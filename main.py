@@ -34,7 +34,6 @@ def generate_car_list():
         status_emoji = "🟢" if data["status"] == "Свободна" else "🔴"
         
         if data["status"] == "Занята" and data["user"]:
-            # Вычисляем оставшееся время
             time_left = ""
             if data["end_time"]:
                 remaining = data["end_time"] - datetime.datetime.now()
@@ -55,14 +54,14 @@ def generate_car_list():
 @client.event
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
-    await tree.sync()  # Синхронизация слеш-команд
+    await tree.sync()
 
-# --- КОМАНДА: /cars ---
+# --- КОМАНДА: /cars (ПРАВИЛЬНАЯ ВЕРСИЯ) ---
 @tree.command(name="cars", description="Показать список всех машин и их статус")
 async def cars_command(interaction: discord.Interaction):
     """Отображает список всех машин."""
-    car_list = generate_car_list()
-    await interaction.response.send_message(car_list)
+    car_list = generate_car_list()  # ВАЖНО: вызываем функцию!
+    await interaction.response.send_message(car_list)  # ВАЖНО: отправляем результат!
 
 # --- КОМАНДА: /take ---
 @tree.command(name="take", description="Взять машину на определенное время")
@@ -75,7 +74,6 @@ async def take_command(
     car_name: str, 
     minutes: app_commands.Range[int, 15, 120]
 ):
-    """Взять машину."""
     if car_name not in cars:
         await interaction.response.send_message(
             f"❌ Машина '{car_name}' не найдена. Используйте /cars для просмотра.",
@@ -90,7 +88,6 @@ async def take_command(
         )
         return
 
-    # Бронируем машину
     user_name = interaction.user.display_name
     end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
 
@@ -106,7 +103,6 @@ async def take_command(
 @tree.command(name="free", description="Освободить машину")
 @app_commands.describe(car_name="Название машины")
 async def free_command(interaction: discord.Interaction, car_name: str):
-    """Освободить машину."""
     if car_name not in cars:
         await interaction.response.send_message(
             f"❌ Машина '{car_name}' не найдена.",
@@ -121,7 +117,6 @@ async def free_command(interaction: discord.Interaction, car_name: str):
         )
         return
 
-    # Освобождаем машину
     cars[car_name]["status"] = "Свободна"
     cars[car_name]["user"] = None
     cars[car_name]["end_time"] = None
