@@ -1,10 +1,10 @@
 import os
 import discord
 from discord import app_commands
-from discord.ui import Button, View, Modal, TextInput
+from discord.ui import Button, View
 import datetime
 
-# --- Данные о машинах (12 штук) ---
+# --- Данные о машинах ---
 cars = {
     "Karin Rebel TS701VCA": {"status": "Свободна", "user": None, "end_time": None},
     "Benefactor Ml63 2010 ST530MFA": {"status": "Свободна", "user": None, "end_time": None},
@@ -26,9 +26,28 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+# --- ID канала для логов (из переменной окружения) ---
+LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+
+# --- Функция для отправки сообщения в лог-канал ---
+async def send_log(message: str, embed: discord.Embed = None):
+    """Отправляет сообщение в указанный канал."""
+    if LOG_CHANNEL_ID == 0:
+        print("⚠️ LOG_CHANNEL_ID не настроен!")
+        return
+    
+    channel = client.get_channel(LOG_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал с ID {LOG_CHANNEL_ID} не найден!")
+        return
+    
+    if embed:
+        await channel.send(message, embed=embed)
+    else:
+        await channel.send(message)
+
 # --- Функция для создания списка машин ---
 def generate_car_list():
-    """Генерирует красивое сообщение со списком всех машин."""
     lines = ["**🚗 Список машин:**"]
     
     for name, data in cars.items():
@@ -76,7 +95,6 @@ class TimeModal(Modal):
                 )
                 return
             
-            # Проверяем, свободна ли машина
             if cars[self.car_name]["status"] == "Занята":
                 await interaction.response.send_message(
                     f"❌ Машина '{self.car_name}' уже занята!",
@@ -84,13 +102,25 @@ class TimeModal(Modal):
                 )
                 return
             
-            # Бронируем машину
             user_name = interaction.user.display_name
             end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
             
             cars[self.car_name]["status"] = "Занята"
             cars[self.car_name]["user"] = user_name
             cars[self.car_name]["end_time"] = end_time
+            
+            # --- ОТПРАВКА В ЛОГ-КАНАЛ ---
+            embed = discord.Embed(
+                title="🚗 Машина взята",
+                description=f"**{self.car_name}**",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Кто взял", value=user_name, inline=True)
+            embed.add_field(name="Время", value=f"{minutes} минут", inline=True)
+            embed.add_field(name="До", value=end_time.strftime("%H:%M"), inline=True)
+            embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
+            
+            await send_log(f"✅ **{user_name}** взял машину **{self.car_name}**", embed=embed)
             
             await interaction.response.send_message(
                 f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
@@ -103,128 +133,96 @@ class TimeModal(Modal):
                 ephemeral=True
             )
 
-# --- Кнопки для быстрого выбора времени ---
-class TimeButtonsView(View):
-    def __init__(self, car_name: str):
-        super().__init__(timeout=60)
-        self.car_name = car_name
-    
-    @discord.ui.button(label="15", style=discord.ButtonStyle.primary)
-    async def time_15(self, interaction: discord.Interaction, button: Button):
-        await self.take_car(interaction, 15)
-    
-    @discord.ui.button(label="30", style=discord.ButtonStyle.primary)
-    async def time_30(self, interaction: discord.Interaction, button: Button):
-        await self.take_car(interaction, 30)
-    
-    @discord.ui.button(label="45", style=discord.ButtonStyle.primary)
-    async def time_45(self, interaction: discord.Interaction, button: Button):
-        await self.take_car(interaction, 45)
-    
-    @discord.ui.button(label="60", style=discord.ButtonStyle.primary)
-    async def time_60(self, interaction: discord.Interaction, button: Button):
-        await self.take_car(interaction, 60)
-    
-    @discord.ui.button(label="90", style=discord.ButtonStyle.primary)
-    async def time_90(self, interaction: discord.Interaction, button: Button):
-        await self.take_car(interaction, 90)
-    
-    @discord.ui.button(label="120", style=discord.ButtonStyle.primary)
-    async def time_120(self, interaction: discord.Interaction, button: Button):
-        await self.take_car(interaction, 120)
-    
-    async def take_car(self, interaction: discord.Interaction, minutes: int):
-        # Проверяем, свободна ли машина
-        if cars[self.car_name]["status"] == "Занята":
-            await interaction.response.send_message(
-                f"❌ Машина '{self.car_name}' уже занята!",
-                ephemeral=True
-            )
-            return
-        
-        # Бронируем машину
-        user_name = interaction.user.display_name
-        end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
-        
-        cars[self.car_name]["status"] = "Занята"
-        cars[self.car_name]["user"] = user_name
-        cars[self.car_name]["end_time"] = end_time
-        
-        await interaction.response.send_message(
-            f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
-            ephemeral=False
-        )
-
-# --- Класс для создания кнопок машин ---
+# --- Класс для кнопок машин ---
 class CarButtonsView(View):
     def __init__(self):
-        super().__init__(timeout=None)  # Кнопки работают всегда
+        super().__init__(timeout=None)
     
     @discord.ui.button(label="Karin Rebel", style=discord.ButtonStyle.success, custom_id="car_0")
     async def car_0(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Karin Rebel TS701VCA")
+        if cars["Karin Rebel TS701VCA"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Karin Rebel TS701VCA"))
     
     @discord.ui.button(label="Benefactor Ml63", style=discord.ButtonStyle.success, custom_id="car_1")
     async def car_1(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Benefactor Ml63 2010 ST530MFA")
+        if cars["Benefactor Ml63 2010 ST530MFA"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Benefactor Ml63 2010 ST530MFA"))
     
     @discord.ui.button(label="Annis Jook", style=discord.ButtonStyle.success, custom_id="car_2")
     async def car_2(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Annis Jook Nizmo RS 2013 JZ738CKY")
+        if cars["Annis Jook Nizmo RS 2013 JZ738CKY"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Annis Jook Nizmo RS 2013 JZ738CKY"))
     
     @discord.ui.button(label="Emperor IC-F", style=discord.ButtonStyle.success, custom_id="car_3")
     async def car_3(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Emperor IC-F 2012 BU363YHX")
+        if cars["Emperor IC-F 2012 BU363YHX"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Emperor IC-F 2012 BU363YHX"))
     
     @discord.ui.button(label="Benefactor G-series", style=discord.ButtonStyle.success, custom_id="car_4")
     async def car_4(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Benefactor G-series 63 ASG 6x6 LY699IEB")
+        if cars["Benefactor G-series 63 ASG 6x6 LY699IEB"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Benefactor G-series 63 ASG 6x6 LY699IEB"))
     
     @discord.ui.button(label="Vapid Bronzo", style=discord.ButtonStyle.success, custom_id="car_5")
     async def car_5(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Vapid Bronzo Predator 2022 GC643UFN")
+        if cars["Vapid Bronzo Predator 2022 GC643UFN"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Vapid Bronzo Predator 2022 GC643UFN"))
     
     @discord.ui.button(label="Karin Thunder", style=discord.ButtonStyle.success, custom_id="car_6")
     async def car_6(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Karin Thunder 2021 SY108SFL")
+        if cars["Karin Thunder 2021 SY108SFL"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Karin Thunder 2021 SY108SFL"))
     
     @discord.ui.button(label="Ocelot Lynx", style=discord.ButtonStyle.success, custom_id="car_7")
     async def car_7(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Ocelot Lynx 2019 HK742XAM")
+        if cars["Ocelot Lynx 2019 HK742XAM"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Ocelot Lynx 2019 HK742XAM"))
     
     @discord.ui.button(label="Grotti Turismo", style=discord.ButtonStyle.success, custom_id="car_8")
     async def car_8(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Grotti Turismo R 2018 PM930SRL")
+        if cars["Grotti Turismo R 2018 PM930SRL"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Grotti Turismo R 2018 PM930SRL"))
     
     @discord.ui.button(label="Pegassi Tempesta", style=discord.ButtonStyle.success, custom_id="car_9")
     async def car_9(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Pegassi Tempesta 2020 YF521KCD")
+        if cars["Pegassi Tempesta 2020 YF521KCD"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Pegassi Tempesta 2020 YF521KCD"))
     
     @discord.ui.button(label="Pfister Comet", style=discord.ButtonStyle.success, custom_id="car_10")
     async def car_10(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Pfister Comet SR 2022 XE876BFT")
+        if cars["Pfister Comet SR 2022 XE876BFT"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
+            return
+        await interaction.response.send_modal(TimeModal("Pfister Comet SR 2022 XE876BFT"))
     
     @discord.ui.button(label="Dewbauchee Vagner", style=discord.ButtonStyle.success, custom_id="car_11")
     async def car_11(self, interaction: discord.Interaction, button: Button):
-        await self.handle_car(interaction, "Dewbauchee Vagner 2023 TD210MXP")
-    
-    async def handle_car(self, interaction: discord.Interaction, car_name: str):
-        if cars[car_name]["status"] == "Занята":
-            await interaction.response.send_message(
-                f"❌ Машина '{car_name}' уже занята!",
-                ephemeral=True
-            )
+        if cars["Dewbauchee Vagner 2023 TD210MXP"]["status"] == "Занята":
+            await interaction.response.send_message("❌ Машина занята!", ephemeral=True)
             return
-        
-        # Показываем кнопки с выбором времени
-        view = TimeButtonsView(car_name)
-        await interaction.response.send_message(
-            f"🚗 **{car_name}**\nВыберите время в минутах:",
-            view=view,
-            ephemeral=True
-        )
+        await interaction.response.send_modal(TimeModal("Dewbauchee Vagner 2023 TD210MXP"))
 
-# --- Кнопки освобождения машин ---
+# --- Кнопки освобождения ---
 class FreeButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -285,7 +283,6 @@ class FreeButtonsView(View):
             )
             return
         
-        # Проверяем, тот ли пользователь освобождает
         if cars[car_name]["user"] != interaction.user.display_name:
             await interaction.response.send_message(
                 f"❌ Вы не можете освободить эту машину! Ее взял: {cars[car_name]['user']}",
@@ -293,9 +290,21 @@ class FreeButtonsView(View):
             )
             return
         
+        user_name = cars[car_name]["user"]
         cars[car_name]["status"] = "Свободна"
         cars[car_name]["user"] = None
         cars[car_name]["end_time"] = None
+        
+        # --- ОТПРАВКА В ЛОГ-КАНАЛ ---
+        embed = discord.Embed(
+            title="🚗 Машина освобождена",
+            description=f"**{car_name}**",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Кто освободил", value=user_name, inline=True)
+        embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
+        
+        await send_log(f"✅ **{user_name}** освободил машину **{car_name}**", embed=embed)
         
         await interaction.response.send_message(
             f"✅ Машина '{car_name}' освобождена!",
@@ -307,22 +316,21 @@ class FreeButtonsView(View):
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     await tree.sync()
+    
+    # Отправляем приветствие в лог-канал
+    await send_log(f"✅ Бот **{client.user}** запущен и готов к работе!")
 
-# --- КОМАНДА: /cars (с кнопками) ---
+# --- КОМАНДА: /cars ---
 @tree.command(name="cars", description="Показать список машин с кнопками")
 async def cars_command(interaction: discord.Interaction):
-    """Отображает список машин с кнопками."""
     car_list = generate_car_list()
     
-    # Создаем два ряда кнопок: взятие и освобождение
     view = View(timeout=None)
     
-    # Добавляем кнопки для взятия машин
     take_view = CarButtonsView()
     for item in take_view.children:
         view.add_item(item)
     
-    # Добавляем кнопки для освобождения машин
     free_view = FreeButtonsView()
     for item in free_view.children:
         view.add_item(item)
