@@ -164,6 +164,60 @@ async def auto_free_timer(car_name: str, minutes: int):
     if car_name in cars and cars[car_name]["status"] == "Занята":
         await free_car_auto(car_name)
 
+# --- Модальное окно для ручного ввода времени ---
+class TimeInputModal(Modal):
+    def __init__(self, car_name: str):
+        super().__init__(title=f"Взять машину: {car_name}")
+        self.car_name = car_name
+        
+        self.time_input = TextInput(
+            label="Время в минутах (1-120)",
+            placeholder="Введите число от 1 до 120",
+            min_length=1,
+            max_length=3,
+            required=True
+        )
+        self.add_item(self.time_input)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            minutes = int(self.time_input.value)
+            if minutes < 1 or minutes > 120:
+                await interaction.response.send_message(
+                    "❌ Время должно быть от 1 до 120 минут!",
+                    ephemeral=True
+                )
+                return
+            
+            if cars[self.car_name]["status"] == "Занята":
+                await interaction.response.send_message(
+                    f"❌ Машина '{self.car_name}' уже занята!",
+                    ephemeral=True
+                )
+                return
+            
+            user_name = interaction.user.display_name
+            end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
+            
+            cars[self.car_name]["status"] = "Занята"
+            cars[self.car_name]["user"] = user_name
+            cars[self.car_name]["end_time"] = end_time
+            
+            asyncio.create_task(auto_free_timer(self.car_name, minutes))
+            
+            await interaction.response.send_message(
+                f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
+                ephemeral=False
+            )
+            
+            await update_cars_channel()
+            
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Введите число!",
+                ephemeral=True
+            )
+
 # --- Класс для кнопок времени ---
 class TimeButtonsView(View):
     def __init__(self, car_name: str):
@@ -193,6 +247,10 @@ class TimeButtonsView(View):
     @discord.ui.button(label="120 мин", style=discord.ButtonStyle.primary)
     async def time_120(self, interaction: discord.Interaction, button: Button):
         await self.take_car(interaction, 120)
+    
+    @discord.ui.button(label="✏️ Своё время", style=discord.ButtonStyle.secondary)
+    async def custom_time(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(TimeInputModal(self.car_name))
     
     async def take_car(self, interaction: discord.Interaction, minutes: int):
         if cars[self.car_name]["status"] == "Занята":
@@ -270,10 +328,10 @@ class SkillSelectView(View):
         print(f"📊 Всего участников: {len(contracts[self.contract_id]['members'])}")
         
         # Показываем обновленный список
+        member_list = "\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()])
         await interaction.response.send_message(
             f"✅ Вы записались на контракт с навыками: **{skill_text}**!\n\n"
-            f"📋 **Текущий список участников:**\n" + 
-            "\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()]),
+            f"📋 **Текущий список участников:**\n{member_list if member_list else '🔴 Нет участников'}",
             ephemeral=True
         )
         
@@ -310,10 +368,10 @@ class CancelContractButton(Button):
         # Удаляем участника
         del contracts[self.contract_id]["members"][user_id]
         
+        member_list = "\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()])
         await interaction.response.send_message(
             f"❌ Вы отказались от выполнения контракта!\n\n"
-            f"📋 **Текущий список участников:**\n" + 
-            ("\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()]) if contracts[self.contract_id]["members"] else "🔴 Нет участников"),
+            f"📋 **Текущий список участников:**\n{member_list if member_list else '🔴 Нет участников'}",
             ephemeral=True
         )
 
@@ -443,7 +501,7 @@ class CarButtonsView(View):
                 )
                 return
             await interaction.response.send_message(
-                f"🚗 **{car_name}**\nВыберите время:",
+                f"🚗 **{car_name}**\nВыберите время (1-120 мин):",
                 view=TimeButtonsView(car_name),
                 ephemeral=True
             )
@@ -618,17 +676,17 @@ async def on_ready():
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contract (теперь работает) ---
+# --- КОМАНДА: /contr (основная команда для контрактов) ---
 @tree.command(
-    name="contract", 
+    name="contr", 
     description="Создать новый контракт",
     guild=discord.Object(id=GUILD_ID)
 )
 @app_commands.describe(name="Название контракта")
-async def contract_command(interaction: discord.Interaction, name: str):
+async def contr_command(interaction: discord.Interaction, name: str):
     """Создает новый контракт в канале."""
     
-    print(f"🔵 Команда /contract вызвана пользователем {interaction.user.display_name}")
+    print(f"🔵 Команда /contr вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Название: {name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     
@@ -709,17 +767,6 @@ async def contract_command(interaction: discord.Interaction, name: str):
         print(f"✅ Ответ отправлен пользователю")
     except Exception as e:
         print(f"❌ Ошибка при ответе пользователю: {e}")
-
-# --- КОМАНДА: /contr (оставлена для совместимости) ---
-@tree.command(
-    name="contr", 
-    description="Создать новый контракт",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(name="Название контракта")
-async def contr_command(interaction: discord.Interaction, name: str):
-    """Создает новый контракт в канале."""
-    await contract_command(interaction, name)
 
 # --- КОМАНДА: /vzp ---
 @tree.command(
