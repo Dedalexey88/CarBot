@@ -5,6 +5,7 @@ from discord.ui import Button, View, Modal, TextInput, Select
 import datetime
 import asyncio
 import pytz
+import re
 
 # --- ID из переменных окружения ---
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
@@ -471,7 +472,6 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
     contract_data = contracts[contract_id]
     members = contract_data["members"]
     
-    # Проверяем, не завершен ли контракт
     if len(members) >= 3:
         return
     
@@ -479,7 +479,6 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
     if channel is None:
         return
     
-    # Формируем время
     if seconds > 0:
         time_text = f"{minutes} мин {seconds} сек"
     else:
@@ -496,47 +495,33 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
 
 # --- Таймер контракта с уведомлениями ---
 async def contract_timer(contract_id: str):
-    """Таймер для контракта с уведомлениями:
-    - 2:30 → осталось 7:30
-    - 5:00 → осталось 5:00
-    - 7:30 → осталось 2:30
-    """
-    
-    # Уведомление через 2 минуты 30 секунд (осталось 7:30)
     await asyncio.sleep(150)  # 2:30
     
     if contract_id in contracts:
         await send_contract_notification(contract_id, 7, 30)
     
-    # Уведомление через 5 минут (осталось 5:00)
-    await asyncio.sleep(150)  # еще 2:30 (всего 5:00)
+    await asyncio.sleep(150)  # 5:00
     
     if contract_id in contracts:
         await send_contract_notification(contract_id, 5, 0)
     
-    # Уведомление через 7 минут 30 секунд (осталось 2:30)
-    await asyncio.sleep(150)  # еще 2:30 (всего 7:30)
+    await asyncio.sleep(150)  # 7:30
     
     if contract_id in contracts:
         await send_contract_notification(contract_id, 2, 30)
     
-    # Ждем до 10 минут (еще 2:30)
-    await asyncio.sleep(150)  # еще 2:30 (всего 10:00)
+    await asyncio.sleep(150)  # 10:00
     
-    # Проверяем, существует ли еще контракт
     if contract_id not in contracts:
         return
     
     contract_data = contracts[contract_id]
     
-    # Проверяем, собралось ли достаточно участников
     if len(contract_data["members"]) >= 3:
         return
     
-    # Контракт провалился - удаляем сообщение и уведомляем
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
-        # Удаляем сообщение с контрактом
         if "message_id" in contract_data and contract_data["message_id"]:
             try:
                 msg = await channel.fetch_message(contract_data["message_id"])
@@ -544,13 +529,11 @@ async def contract_timer(contract_id: str):
             except:
                 pass
         
-        # Отправляем сообщение о провале
         await channel.send(
             f"❌ **Сбор на контракт '{contract_data['name']}' провалился!**\n"
             f"Недостаточно реакций. Собрано: {len(contract_data['members'])} из 3 человек."
         )
     
-    # Удаляем контракт из памяти
     if contract_id in contracts:
         del contracts[contract_id]
 
@@ -562,14 +545,12 @@ async def finish_contract(contract_id: str):
     contract_data = contracts[contract_id]
     members = contract_data["members"]
     
-    # Отменяем таймер, если он есть
     if "timer_task" in contract_data:
         contract_data["timer_task"].cancel()
     
     if len(members) < 2:
         channel = client.get_channel(CONTRACT_CHANNEL_ID)
         if channel:
-            # Удаляем сообщение с контрактом
             if "message_id" in contract_data and contract_data["message_id"]:
                 try:
                     msg = await channel.fetch_message(contract_data["message_id"])
@@ -585,7 +566,6 @@ async def finish_contract(contract_id: str):
         del contracts[contract_id]
         return
     
-    # Контракт успешно сформирован - желаем удачи
     embed = discord.Embed(
         title="✅ Контракт сформирован!",
         description=f"**{contract_data['name']}**",
@@ -608,7 +588,6 @@ async def finish_contract(contract_id: str):
     
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
-        # Удаляем старое сообщение с контрактом
         if "message_id" in contract_data and contract_data["message_id"]:
             try:
                 msg = await channel.fetch_message(contract_data["message_id"])
@@ -616,7 +595,6 @@ async def finish_contract(contract_id: str):
             except:
                 pass
         
-        # Отправляем финальное сообщение
         msg = await channel.send(
             content="@Контракт @everyone",
             embed=embed
@@ -853,7 +831,6 @@ async def update_vzp_messages():
         print(f"❌ Канал VZP не найден!")
         return
     
-    # --- Обновляем сообщение для атаки ---
     if not vzp_data["attack_completed"] and vzp_data["attack_target"] > 0:
         attack_list = "\n".join([f"• {data['name']}" for data in vzp_data["attack_members"].values()]) if vzp_data["attack_members"] else "🔴 Нет участников"
         
@@ -893,7 +870,6 @@ async def update_vzp_messages():
             except:
                 pass
     
-    # --- Обновляем сообщение для защиты ---
     if not vzp_data["defense_completed"] and vzp_data["defense_target"] > 0:
         defense_list = "\n".join([f"• {data['name']}" for data in vzp_data["defense_members"].values()]) if vzp_data["defense_members"] else "🔴 Нет участников"
         
@@ -1039,6 +1015,80 @@ async def reminder_loop():
             print(f"❌ Ошибка в цикле напоминаний: {e}")
         await asyncio.sleep(600)
 
+# --- ОБРАБОТЧИК СООБЩЕНИЙ ДЛЯ /contr И !контракт ---
+@client.event
+async def on_message(message: discord.Message):
+    # Игнорируем сообщения от бота
+    if message.author == client.user:
+        return
+    
+    # Проверяем, что сообщение в канале контрактов
+    if message.channel.id != CONTRACT_CHANNEL_ID:
+        return
+    
+    content = message.content.strip()
+    
+    # Проверяем команду /contr текст
+    if content.lower().startswith('/contr '):
+        text = content[7:].strip()  # Убираем '/contr ' (7 символов)
+        if text:
+            # Создаем фейковое взаимодействие
+            class FakeInteraction:
+                def __init__(self, user, channel_id):
+                    self.user = user
+                    self.channel_id = channel_id
+                    self.response = None
+                    self._followup = None
+                
+                async def response(self):
+                    return self
+                
+                async def send_message(self, content, ephemeral=False):
+                    # Отправляем ответ в канал
+                    await message.channel.send(content)
+                
+                async def followup(self):
+                    return self
+            
+            fake_interaction = FakeInteraction(message.author, message.channel.id)
+            
+            # Вызываем команду
+            await contr_command(fake_interaction, text)
+            
+            # Удаляем сообщение пользователя, чтобы не спамить
+            try:
+                await message.delete()
+            except:
+                pass
+            return
+    
+    # Проверяем команду !контракт текст
+    if content.lower().startswith('!контракт '):
+        text = content[10:].strip()  # Убираем '!контракт ' (10 символов)
+        if text:
+            class FakeInteraction:
+                def __init__(self, user, channel_id):
+                    self.user = user
+                    self.channel_id = channel_id
+                
+                async def response(self):
+                    return self
+                
+                async def send_message(self, content, ephemeral=False):
+                    await message.channel.send(content)
+                
+                async def followup(self):
+                    return self
+            
+            fake_interaction = FakeInteraction(message.author, message.channel.id)
+            await contr_command(fake_interaction, text)
+            
+            try:
+                await message.delete()
+            except:
+                pass
+            return
+
 # --- СОБЫТИЕ on_ready ---
 @client.event
 async def on_ready():
@@ -1160,7 +1210,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
-    # Запускаем таймер с уведомлениями
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
@@ -1188,8 +1237,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
     text="Кто противник (например: skipper)"
 )
 async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50], text: str = ""):
-    """Создает сбор на атаку в канале VZP."""
-    
     print(f"🔵 Команда /vzp_atk вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     print(f"🔵 Нужно человек: {count}")
@@ -1239,8 +1286,6 @@ async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.
     text="Кто противник (например: skipper)"
 )
 async def vzp_def_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50], text: str = ""):
-    """Создает сбор на защиту в канале VZP."""
-    
     print(f"🔵 Команда /vzp_def вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     print(f"🔵 Нужно человек: {count}")
