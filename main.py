@@ -5,18 +5,19 @@ from discord.ui import Button, View, Modal, TextInput
 import datetime
 import asyncio
 
-# --- ID каналов (хардкод) ---
-CONTRACT_CHANNEL_ID = 1514230445825593424  # Канал для контрактов
-CAR_CHANNEL_ID = 1525982684281704599  # ВСТАВЬТЕ ID КАНАЛА ДЛЯ МАШИН!
-LOG_CHANNEL_ID = 1525982684281704599   # ВСТАВЬТЕ ID КАНАЛА ДЛЯ ЛОГОВ (опционально)
-GUILD_ID = 1502042250866069554         # ВСТАВЬТЕ ID ВАШЕГО СЕРВЕРА!
+# --- ID из переменных окружения ---
+GUILD_ID = int(os.getenv('GUILD_ID', 0))
+CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
+CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
+LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 
-print(f"""
-📋 ПРОВЕРКА ID:
-CONTRACT_CHANNEL_ID: {CONTRACT_CHANNEL_ID}
-CAR_CHANNEL_ID: {CAR_CHANNEL_ID}
-GUILD_ID: {GUILD_ID}
-""")
+# Проверяем, что все ID заданы
+if GUILD_ID == 0:
+    print("❌ ОШИБКА: GUILD_ID не задан в переменных окружения!")
+if CONTRACT_CHANNEL_ID == 0:
+    print("❌ ОШИБКА: CONTRACT_CHANNEL_ID не задан в переменных окружения!")
+if CAR_CHANNEL_ID == 0:
+    print("❌ ОШИБКА: CAR_CHANNEL_ID не задан в переменных окружения!")
 
 # --- Данные о машинах (7 штук) ---
 cars = {
@@ -481,6 +482,10 @@ async def on_ready():
         guild = discord.Object(id=GUILD_ID)
         await tree.sync(guild=guild)
         print(f'✅ Команды синхронизированы')
+        
+        # Выводим список команд
+        commands = await tree.fetch_commands(guild=guild)
+        print(f'📋 Доступные команды: {[cmd.name for cmd in commands]}')
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
     
@@ -493,19 +498,28 @@ async def on_ready():
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contract ---
-@tree.command(name="contract", description="Создать новый контракт", guild=discord.Object(id=GUILD_ID))
+# --- КОМАНДА: /contr (новая команда вместо /contract) ---
+@tree.command(
+    name="contr", 
+    description="Создать новый контракт",
+    guild=discord.Object(id=GUILD_ID)
+)
 @app_commands.describe(name="Название контракта")
-async def contract_command(interaction: discord.Interaction, name: str):
+async def contr_command(interaction: discord.Interaction, name: str):
+    """Создает новый контракт в канале."""
+    
+    # Проверяем канал
     if interaction.channel_id != CONTRACT_CHANNEL_ID:
         await interaction.response.send_message(
-            f"❌ Команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+            f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
             ephemeral=True
         )
         return
     
+    # Генерируем ID контракта
     contract_id = f"{interaction.user.id}_{datetime.datetime.now().timestamp()}"
     
+    # Создаем контракт
     contracts[contract_id] = {
         "name": name,
         "author": interaction.user.display_name,
@@ -514,9 +528,11 @@ async def contract_command(interaction: discord.Interaction, name: str):
         "created_at": datetime.datetime.now()
     }
     
+    # Создаем View с кнопкой
     view = View(timeout=None)
     view.add_item(ContractJoinButton(contract_id))
     
+    # Отправляем сообщение
     embed = discord.Embed(
         title="📋 Новый контракт",
         description=f"**{name}**",
@@ -526,6 +542,7 @@ async def contract_command(interaction: discord.Interaction, name: str):
     embed.add_field(name="Статус", value="⏳ Набор (0/3)", inline=True)
     embed.add_field(name="Время", value="5 минут", inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
+    embed.add_field(name="Требования", value="Навыки: слабые, средние, сильные", inline=False)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
     
     await interaction.response.send_message(
@@ -534,11 +551,16 @@ async def contract_command(interaction: discord.Interaction, name: str):
         view=view
     )
     
+    # Запускаем таймер
     task = asyncio.create_task(contract_timer(contract_id))
     contracts[contract_id]["timer_task"] = task
 
 # --- КОМАНДА: /cars ---
-@tree.command(name="cars", description="Обновить список машин", guild=discord.Object(id=GUILD_ID))
+@tree.command(
+    name="cars", 
+    description="Обновить список машин",
+    guild=discord.Object(id=GUILD_ID)
+)
 async def cars_command(interaction: discord.Interaction):
     if interaction.channel_id != CAR_CHANNEL_ID:
         await interaction.response.send_message(
@@ -547,7 +569,232 @@ async def cars_command(interaction: discord.Interaction):
         )
         return
     
-    await interaction.response.send_message("🔄 Обновляю...", ephemeral=True)
+    await interaction.response.send_message("🔄 Обновляю список машин...", ephemeral=True)
+    await update_cars_channel()
+
+# --- КОМАНДА: /add_car ---
+@tree.command(
+    name="add_car", 
+    description="Добавить новую машину",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def add_car_command(interaction: discord.Interaction):
+    class AddCarModal(Modal):
+        def __init__(self):
+            super().__init__(title="Добавить машину")
+            
+            self.car_name_input = TextInput(
+                label="Название машины",
+                placeholder="Введите название новой машины",
+                min_length=1,
+                max_length=100,
+                required=True
+            )
+            self.add_item(self.car_name_input)
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            car_name = self.car_name_input.value
+            
+            if car_name in cars:
+                await interaction.response.send_message(
+                    f"❌ Машина '{car_name}' уже существует!",
+                    ephemeral=True
+                )
+                return
+            
+            cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
+            
+            await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
+            
+            await interaction.response.send_message(
+                f"✅ Машина '{car_name}' успешно добавлена!",
+                ephemeral=False
+            )
+            
+            await update_cars_channel()
+    
+    await interaction.response.send_modal(AddCarModal())
+
+# --- КОМАНДА: /remove_car ---
+@tree.command(
+    name="remove_car", 
+    description="Удалить машину",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(car_name="Название машины для удаления")
+async def remove_car_command(interaction: discord.Interaction, car_name: str):
+    if car_name not in cars:
+        await interaction.response.send_message(
+            f"❌ Машина '{car_name}' не найдена!",
+            ephemeral=True
+        )
+        return
+    
+    if cars[car_name]["status"] == "Занята":
+        await interaction.response.send_message(
+            f"❌ Нельзя удалить машину '{car_name}' — она занята!",
+            ephemeral=True
+        )
+        return
+    
+    del cars[car_name]
+    
+    await send_log(f"❌ **{interaction.user.display_name}** удалил машину: **{car_name}**")
+    
+    await interaction.response.send_message(
+        f"✅ Машина '{car_name}' успешно удалена!",
+        ephemeral=False
+    )
+    
+    await update_cars_channel()
+
+# --- КОМАНДА: /rename_car ---
+@tree.command(
+    name="rename_car", 
+    description="Переименовать машину",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(car_name="Название машины для переименования")
+async def rename_car_command(interaction: discord.Interaction, car_name: str):
+    if car_name not in cars:
+        await interaction.response.send_message(
+            f"❌ Машина '{car_name}' не найдена!",
+            ephemeral=True
+        )
+        return
+    
+    class RenameCarModal(Modal):
+        def __init__(self, old_name: str):
+            super().__init__(title=f"Переименовать: {old_name}")
+            self.old_name = old_name
+            
+            self.new_name_input = TextInput(
+                label="Новое название",
+                placeholder="Введите новое название машины",
+                min_length=1,
+                max_length=100,
+                required=True
+            )
+            self.add_item(self.new_name_input)
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            new_name = self.new_name_input.value
+            
+            if new_name in cars:
+                await interaction.response.send_message(
+                    f"❌ Машина '{new_name}' уже существует!",
+                    ephemeral=True
+                )
+                return
+            
+            car_data = cars.pop(self.old_name)
+            cars[new_name] = car_data
+            
+            await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
+            
+            await interaction.response.send_message(
+                f"✅ Машина '{self.old_name}' переименована в '{new_name}'!",
+                ephemeral=False
+            )
+            
+            await update_cars_channel()
+    
+    await interaction.response.send_modal(RenameCarModal(car_name))
+
+# --- КОМАНДА: /list_cars ---
+@tree.command(
+    name="list_cars", 
+    description="Показать список машин без кнопок",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def list_cars_command(interaction: discord.Interaction):
+    car_list = generate_car_list()
+    await interaction.response.send_message(car_list, ephemeral=True)
+
+# --- КОМАНДА: /take ---
+@tree.command(
+    name="take", 
+    description="Взять машину",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(
+    car_name="Название машины",
+    minutes="Время в минутах (от 1 до 120)"
+)
+async def take_command(
+    interaction: discord.Interaction, 
+    car_name: str, 
+    minutes: app_commands.Range[int, 1, 120]
+):
+    if car_name not in cars:
+        await interaction.response.send_message(
+            f"❌ Машина '{car_name}' не найдена.",
+            ephemeral=True
+        )
+        return
+
+    if cars[car_name]["status"] == "Занята":
+        await interaction.response.send_message(
+            f"❌ Машина '{car_name}' уже занята.",
+            ephemeral=True
+        )
+        return
+
+    user_name = interaction.user.display_name
+    end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
+
+    cars[car_name]["status"] = "Занята"
+    cars[car_name]["user"] = user_name
+    cars[car_name]["end_time"] = end_time
+
+    asyncio.create_task(auto_free_timer(car_name, minutes))
+
+    await interaction.response.send_message(
+        f"✅ Машина '{car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
+        ephemeral=False
+    )
+    
+    await update_cars_channel()
+
+# --- КОМАНДА: /free ---
+@tree.command(
+    name="free", 
+    description="Освободить машину",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(car_name="Название машины")
+async def free_command(interaction: discord.Interaction, car_name: str):
+    if car_name not in cars:
+        await interaction.response.send_message(
+            f"❌ Машина '{car_name}' не найдена.",
+            ephemeral=True
+        )
+        return
+
+    if cars[car_name]["status"] == "Свободна":
+        await interaction.response.send_message(
+            f"✅ Машина '{car_name}' уже свободна.",
+            ephemeral=True
+        )
+        return
+
+    if cars[car_name]["user"] != interaction.user.display_name:
+        await interaction.response.send_message(
+            f"❌ Вы не можете освободить эту машину! Ее взял: {cars[car_name]['user']}",
+            ephemeral=True
+        )
+        return
+
+    user_name = cars[car_name]["user"]
+    cars[car_name]["status"] = "Свободна"
+    cars[car_name]["user"] = None
+    cars[car_name]["end_time"] = None
+
+    await interaction.response.send_message(
+        f"✅ Машина '{car_name}' освобождена!",
+        ephemeral=False
+    )
+    
     await update_cars_channel()
 
 # --- ЗАПУСК БОТА ---
