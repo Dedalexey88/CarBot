@@ -1017,7 +1017,7 @@ async def reminder_loop():
 
 # --- ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КОНТРАКТА ИЗ СООБЩЕНИЯ ---
 async def create_contract_from_message(message: discord.Message, name: str):
-    """Создает контракт из текстового сообщения."""
+    """Создает контракт из текстового сообщения с обнулением таймера."""
     
     print(f"🔵 Создание контракта из сообщения от {message.author.display_name}")
     print(f"🔵 Название: {name}")
@@ -1072,10 +1072,11 @@ async def create_contract_from_message(message: discord.Message, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
+    # Запускаем таймер с обнулением (всегда с 0)
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
-        print(f"✅ Таймер запущен")
+        print(f"✅ Таймер запущен с 0")
     except Exception as e:
         print(f"❌ Ошибка при запуске таймера: {e}")
 
@@ -1235,10 +1236,11 @@ async def contr_command(interaction: discord.Interaction, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
+    # Запускаем таймер с обнулением (всегда с 0)
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
-        print(f"✅ Таймер запущен")
+        print(f"✅ Таймер запущен с 0")
     except Exception as e:
         print(f"❌ Ошибка при запуске таймера: {e}")
     
