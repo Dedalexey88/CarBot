@@ -496,25 +496,29 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
 
 # --- Таймер контракта с уведомлениями ---
 async def contract_timer(contract_id: str):
-    """Таймер для контракта с уведомлениями на 2:30, 5:00 и 7:30."""
+    """Таймер для контракта с уведомлениями:
+    - 2:30 → осталось 7:30
+    - 5:00 → осталось 5:00
+    - 7:30 → осталось 2:30
+    """
     
-    # Уведомление через 2 минуты 30 секунд
+    # Уведомление через 2 минуты 30 секунд (осталось 7:30)
     await asyncio.sleep(150)  # 2:30
     
     if contract_id in contracts:
-        await send_contract_notification(contract_id, 2, 30)
+        await send_contract_notification(contract_id, 7, 30)
     
-    # Уведомление через 5 минут (еще через 2:30)
+    # Уведомление через 5 минут (осталось 5:00)
     await asyncio.sleep(150)  # еще 2:30 (всего 5:00)
     
     if contract_id in contracts:
         await send_contract_notification(contract_id, 5, 0)
     
-    # Уведомление через 7 минут 30 секунд (еще через 2:30)
+    # Уведомление через 7 минут 30 секунд (осталось 2:30)
     await asyncio.sleep(150)  # еще 2:30 (всего 7:30)
     
     if contract_id in contracts:
-        await send_contract_notification(contract_id, 7, 30)
+        await send_contract_notification(contract_id, 2, 30)
     
     # Ждем до 10 минут (еще 2:30)
     await asyncio.sleep(150)  # еще 2:30 (всего 10:00)
