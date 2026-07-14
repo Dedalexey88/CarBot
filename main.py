@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput, Select
 import datetime
 import asyncio
+import pytz
 
 # --- ID из переменных окружения ---
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
@@ -11,6 +12,9 @@ CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
 CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
 VZP_CHANNEL_ID = 1523341052680081408  # ID канала для VZP
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+
+# --- Московский часовой пояс ---
+MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 
 # --- Данные о машинах (7 штук) ---
 cars = {
@@ -32,7 +36,9 @@ vzp_data = {
     "message_id": None,
     "channel_id": VZP_CHANNEL_ID,
     "target_count": 0,
-    "is_completed": False
+    "is_completed": False,
+    "last_reminder_time": None,
+    "reminder_task": None
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -710,6 +716,11 @@ async def complete_vzp():
     
     vzp_data["is_completed"] = True
     
+    # Отменяем задачу напоминаний
+    if vzp_data["reminder_task"]:
+        vzp_data["reminder_task"].cancel()
+        vzp_data["reminder_task"] = None
+    
     # Формируем финальный список участников
     attack_list = []
     defense_list = []
@@ -748,16 +759,72 @@ async def complete_vzp():
     
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel:
-        # Отправляем финальное сообщение
         await channel.send(content="@everyone", embed=embed)
         
-        # Удаляем старое сообщение с кнопками (если есть)
         if vzp_data["message_id"]:
             try:
                 msg = await channel.fetch_message(vzp_data["message_id"])
                 await msg.delete()
             except:
                 pass
+
+# --- Функция проверки времени для напоминаний ---
+def should_send_reminder():
+    """Проверяет, можно ли отправлять напоминание (с 12:00 до 2:00)"""
+    now = datetime.datetime.now(MOSCOW_TZ)
+    hour = now.hour
+    
+    # Не отправляем с 2:00 до 12:00
+    if hour >= 2 and hour < 12:
+        return False
+    return True
+
+# --- Функция напоминания ---
+async def send_reminder():
+    """Отправляет напоминание о сборе"""
+    channel = client.get_channel(VZP_CHANNEL_ID)
+    if channel is None:
+        return
+    
+    # Проверяем, не завершен ли сбор
+    if vzp_data["is_completed"]:
+        return
+    
+    # Проверяем, можно ли отправлять напоминание
+    if not should_send_reminder():
+        print(f"⏰ Напоминание пропущено (ночное время 2:00-12:00)")
+        return
+    
+    # Проверяем, не было ли отправлено напоминание менее 2 часов назад
+    if vzp_data["last_reminder_time"]:
+        time_diff = (datetime.datetime.now() - vzp_data["last_reminder_time"]).total_seconds()
+        if time_diff < 7200:  # 2 часа в секундах
+            return
+    
+    # Отправляем напоминание
+    await channel.send(
+        "⏰ **Парни прошло 2 часа, как вы не забивали вску, не пора ли собрать и навалять?**\n"
+        f"Используйте `/vzp {vzp_data['target_count']}` для сбора реакций {vzp_data['target_count']}x{vzp_data['target_count']}!"
+    )
+    
+    vzp_data["last_reminder_time"] = datetime.datetime.now()
+    print(f"✅ Напоминание отправлено в {datetime.datetime.now().strftime('%H:%M')}")
+
+# --- Фоновый цикл напоминаний ---
+async def reminder_loop():
+    """Фоновый цикл, проверяющий каждые 10 минут необходимость отправки напоминания"""
+    await client.wait_until_ready()
+    
+    while not client.is_closed():
+        try:
+            # Проверяем, есть ли активный сбор
+            if not vzp_data["is_completed"] and vzp_data["target_count"] > 0:
+                await send_reminder()
+        except Exception as e:
+            print(f"❌ Ошибка в цикле напоминаний: {e}")
+        
+        # Ждем 10 минут перед следующей проверкой
+        await asyncio.sleep(600)  # 10 минут
 
 # --- Обновление сообщения VZP ---
 async def update_vzp_message():
@@ -841,11 +908,15 @@ async def on_ready():
         await update_cars_channel()
     
     if VZP_CHANNEL_ID:
-        # Сбрасываем состояние VZP при запуске
         vzp_data["members"] = {}
         vzp_data["message_id"] = None
         vzp_data["is_completed"] = False
+        vzp_data["target_count"] = 0
+        vzp_data["last_reminder_time"] = None
         await update_vzp_message()
+    
+    # Запускаем цикл напоминаний
+    client.loop.create_task(reminder_loop())
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
@@ -971,6 +1042,7 @@ async def vzp_command(interaction: discord.Interaction, count: app_commands.Rang
     vzp_data["message_id"] = None
     vzp_data["target_count"] = count
     vzp_data["is_completed"] = False
+    vzp_data["last_reminder_time"] = None
     
     await update_vzp_message()
     
