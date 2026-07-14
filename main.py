@@ -475,7 +475,106 @@ async def on_ready():
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contr ---
+# --- КОМАНДА: /contract (полная копия /contr) ---
+@tree.command(
+    name="contract", 
+    description="Создать новый контракт",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(name="Название контракта")
+async def contract_command(interaction: discord.Interaction, name: str):
+    """Создает новый контракт в канале."""
+    
+    print(f"🔵 Команда /contract вызвана пользователем {interaction.user.display_name}")
+    print(f"🔵 Название: {name}")
+    print(f"🔵 Канал: {interaction.channel_id}")
+    
+    # Проверяем канал
+    if interaction.channel_id != CONTRACT_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+            ephemeral=True
+        )
+        return
+    
+    # Проверяем, что канал существует
+    channel = client.get_channel(CONTRACT_CHANNEL_ID)
+    if channel is None:
+        await interaction.response.send_message(
+            f"❌ Канал с ID {CONTRACT_CHANNEL_ID} не найден!",
+            ephemeral=True
+        )
+        return
+    
+    print(f"✅ Канал найден: {channel.name}")
+    
+    # Создаем контракт
+    contract_id = f"{interaction.user.id}_{int(datetime.datetime.now().timestamp())}"
+    
+    contracts[contract_id] = {
+        "name": name,
+        "author": interaction.user.display_name,
+        "author_id": str(interaction.user.id),
+        "members": {},
+        "created_at": datetime.datetime.now()
+    }
+    
+    print(f"✅ Контракт создан: {contract_id}")
+    
+    # Создаем кнопку
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
+    
+    # Создаем Embed
+    embed = discord.Embed(
+        title="📋 Новый контракт",
+        description=f"**{name}**",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
+    embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
+    embed.add_field(name="Время на сбор", value="5 минут", inline=True)
+    embed.add_field(name="Минимум", value="2 человека", inline=True)
+    embed.add_field(name="Требования", value="Укажите навыки: слабые, средние, сильные", inline=False)
+    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
+    
+    # Отправляем сообщение в канал
+    try:
+        sent_message = await channel.send(
+            content="@Контракт",
+            embed=embed,
+            view=view
+        )
+        print(f"✅ Сообщение отправлено: {sent_message.id}")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке сообщения: {e}")
+        await interaction.response.send_message(
+            f"❌ Не удалось отправить сообщение: {e}",
+            ephemeral=True
+        )
+        if contract_id in contracts:
+            del contracts[contract_id]
+        return
+    
+    # Запускаем таймер
+    try:
+        task = asyncio.create_task(contract_timer(contract_id))
+        contracts[contract_id]["timer_task"] = task
+        print(f"✅ Таймер запущен")
+    except Exception as e:
+        print(f"❌ Ошибка при запуске таймера: {e}")
+    
+    # Отвечаем пользователю
+    try:
+        await interaction.response.send_message(
+            f"✅ Контракт **{name}** успешно создан!",
+            ephemeral=True
+        )
+        print(f"✅ Ответ отправлен пользователю")
+    except Exception as e:
+        print(f"❌ Ошибка при ответе пользователю: {e}")
+
+# --- КОМАНДА: /contr (дубликат /contract) ---
 @tree.command(
     name="contr", 
     description="Создать новый контракт",
@@ -781,16 +880,4 @@ async def free_command(interaction: discord.Interaction, car_name: str):
     user_name = cars[car_name]["user"]
     cars[car_name]["status"] = "Свободна"
     cars[car_name]["user"] = None
-    cars[car_name]["end_time"] = None
-    await interaction.response.send_message(
-        f"✅ Машина '{car_name}' освобождена!",
-        ephemeral=False
-    )
-    await update_cars_channel()
-
-# --- ЗАПУСК БОТА ---
-token = os.getenv('DISCORD_TOKEN')
-if token:
-    client.run(token)
-else:
-    print("❌ ОШИБКА: DISCORD_TOKEN не найден в переменных окружения!")
+    cars[car_name]["end
