@@ -308,7 +308,7 @@ async def update_contract_message(contract_id: str):
     )
     embed.add_field(name="Создал", value=contract_data['author'], inline=True)
     embed.add_field(name="Статус", value=f"⏳ Набор участников ({len(members)}/3)", inline=True)
-    embed.add_field(name="Время на сбор", value="5 минут", inline=True)
+    embed.add_field(name="Осталось времени", value=contract_data['time_left'], inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
     embed.add_field(
         name=f"👥 Участники ({len(members)} человек)",
@@ -462,6 +462,68 @@ class ContractJoinButton(Button):
             ephemeral=True
         )
 
+# --- Таймер контракта с уведомлениями ---
+async def contract_timer(contract_id: str):
+    """Таймер для контракта с уведомлениями на 5 и 10 минут."""
+    
+    # Ждем 5 минут
+    await asyncio.sleep(300)  # 5 минут
+    
+    # Проверяем, существует ли еще контракт
+    if contract_id not in contracts:
+        return
+    
+    contract_data = contracts[contract_id]
+    
+    # Проверяем, не завершен ли контракт
+    if len(contract_data["members"]) >= 3:
+        # Контракт уже завершен
+        return
+    
+    # Отправляем уведомление о 5 минутах
+    channel = client.get_channel(CONTRACT_CHANNEL_ID)
+    if channel:
+        await channel.send(
+            f"⏰ **Осталось 5 минут!**\n"
+            f"Скорее ставьте реакции в контракт **{contract_data['name']}**!\n"
+            f"Нужно еще {3 - len(contract_data['members'])} человек."
+        )
+    
+    # Ждем еще 5 минут (всего 10)
+    await asyncio.sleep(300)  # еще 5 минут
+    
+    # Проверяем, существует ли еще контракт
+    if contract_id not in contracts:
+        return
+    
+    contract_data = contracts[contract_id]
+    
+    # Проверяем, собралось ли достаточно участников
+    if len(contract_data["members"]) >= 3:
+        # Контракт уже завершен
+        return
+    
+    # Контракт провалился - удаляем сообщение и уведомляем
+    channel = client.get_channel(CONTRACT_CHANNEL_ID)
+    if channel:
+        # Удаляем сообщение с контрактом
+        if "message_id" in contract_data and contract_data["message_id"]:
+            try:
+                msg = await channel.fetch_message(contract_data["message_id"])
+                await msg.delete()
+            except:
+                pass
+        
+        # Отправляем сообщение о провале
+        await channel.send(
+            f"❌ **Сбор на контракт '{contract_data['name']}' провалился!**\n"
+            f"Недостаточно реакций. Собрано: {len(contract_data['members'])} из 3 человек."
+        )
+    
+    # Удаляем контракт из памяти
+    if contract_id in contracts:
+        del contracts[contract_id]
+
 # --- Функция завершения контракта ---
 async def finish_contract(contract_id: str):
     if contract_id not in contracts:
@@ -470,12 +532,21 @@ async def finish_contract(contract_id: str):
     contract_data = contracts[contract_id]
     members = contract_data["members"]
     
+    # Отменяем таймер, если он есть
     if "timer_task" in contract_data:
         contract_data["timer_task"].cancel()
     
     if len(members) < 2:
         channel = client.get_channel(CONTRACT_CHANNEL_ID)
         if channel:
+            # Удаляем сообщение с контрактом
+            if "message_id" in contract_data and contract_data["message_id"]:
+                try:
+                    msg = await channel.fetch_message(contract_data["message_id"])
+                    await msg.delete()
+                except:
+                    pass
+            
             await channel.send(
                 f"❌ **{contract_data['name']}**\n"
                 f"Извините, нужно минимум двое на контракт.\n"
@@ -484,6 +555,7 @@ async def finish_contract(contract_id: str):
         del contracts[contract_id]
         return
     
+    # Контракт успешно сформирован - желаем удачи
     embed = discord.Embed(
         title="✅ Контракт сформирован!",
         description=f"**{contract_data['name']}**",
@@ -502,9 +574,19 @@ async def finish_contract(contract_id: str):
         value="\n\n".join(member_list),
         inline=False
     )
+    embed.set_footer(text="Удачи в выполнении контракта! 🍀")
     
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
+        # Удаляем старое сообщение с контрактом
+        if "message_id" in contract_data and contract_data["message_id"]:
+            try:
+                msg = await channel.fetch_message(contract_data["message_id"])
+                await msg.delete()
+            except:
+                pass
+        
+        # Отправляем финальное сообщение
         msg = await channel.send(
             content="@Контракт @everyone",
             embed=embed
@@ -512,23 +594,6 @@ async def finish_contract(contract_id: str):
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
     
     del contracts[contract_id]
-
-# --- Таймер контракта ---
-async def contract_timer(contract_id: str):
-    await asyncio.sleep(300)  # 5 минут
-    
-    if contract_id not in contracts:
-        return
-    
-    contract_data = contracts[contract_id]
-    
-    if len(contract_data["members"]) > 0:
-        await finish_contract(contract_id)
-    else:
-        channel = client.get_channel(CONTRACT_CHANNEL_ID)
-        if channel:
-            await channel.send(f"❌ Контракт **{contract_data['name']}** отменен: никто не записался за 5 минут.")
-        del contracts[contract_id]
 
 # --- Кнопки машин ---
 class CarButtonsView(View):
@@ -864,7 +929,6 @@ async def complete_vzp():
     attack_text = "\n".join([f"• {name}" for name in attack_list]) if attack_list else "Нет"
     defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "Нет"
     
-    # Добавляем информацию о противнике, если есть
     if vzp_data["attack_text"]:
         embed.add_field(
             name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
@@ -1022,7 +1086,8 @@ async def contr_command(interaction: discord.Interaction, name: str):
         "author_id": str(interaction.user.id),
         "members": {},
         "created_at": datetime.datetime.now(),
-        "message_id": None
+        "message_id": None,
+        "time_left": "10 минут"
     }
     
     print(f"✅ Контракт создан: {contract_id}")
@@ -1034,7 +1099,7 @@ async def contr_command(interaction: discord.Interaction, name: str):
     )
     embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
     embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
-    embed.add_field(name="Время на сбор", value="5 минут", inline=True)
+    embed.add_field(name="Осталось времени", value="10 минут", inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
     embed.add_field(name="👥 Участники (0 человек)", value="🔴 Нет участников", inline=False)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
@@ -1065,6 +1130,7 @@ async def contr_command(interaction: discord.Interaction, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
+    # Запускаем таймер с уведомлениями
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
