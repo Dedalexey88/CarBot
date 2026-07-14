@@ -1,7 +1,7 @@
 import os
 import discord
 from discord import app_commands
-from discord.ui import Button, View, Modal, TextInput
+from discord.ui import Button, View, Modal, TextInput, Select
 import datetime
 import asyncio
 
@@ -210,38 +210,32 @@ class TimeButtonsView(View):
         
         await update_cars_channel()
 
-# --- Модальное окно для навыков ---
-class SkillModal(Modal):
+# --- Модальное окно с выбором навыков ---
+class SkillSelectView(View):
     def __init__(self, contract_id: str):
-        super().__init__(title="📝 Укажите свои навыки")
+        super().__init__(timeout=60)
         self.contract_id = contract_id
         
-        self.skill_weak = TextInput(
-            label="🔹 Слабые навыки",
-            placeholder="Например: стрельба, вождение",
-            required=False,
-            max_length=100
+        self.select = Select(
+            placeholder="Выберите уровень навыков",
+            options=[
+                discord.SelectOption(label="🔹 Слабые", value="weak", description="Базовый уровень"),
+                discord.SelectOption(label="🔸 Средние", value="medium", description="Средний уровень"),
+                discord.SelectOption(label="🔺 Сильные", value="strong", description="Высокий уровень"),
+            ]
         )
-        self.add_item(self.skill_weak)
-        
-        self.skill_medium = TextInput(
-            label="🔸 Средние навыки",
-            placeholder="Например: тактика, планирование",
-            required=False,
-            max_length=100
-        )
-        self.add_item(self.skill_medium)
-        
-        self.skill_strong = TextInput(
-            label="🔺 Сильные навыки",
-            placeholder="Например: лидерство, снайпинг",
-            required=False,
-            max_length=100
-        )
-        self.add_item(self.skill_strong)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
     
-    async def on_submit(self, interaction: discord.Interaction):
-        print(f"🔵 Модальное окно отправлено пользователем {interaction.user.display_name}")
+    async def select_callback(self, interaction: discord.Interaction):
+        skill_level = self.select.values[0]
+        
+        skill_names = {
+            "weak": "🔹 Слабые",
+            "medium": "🔸 Средние",
+            "strong": "🔺 Сильные"
+        }
+        skill_text = skill_names.get(skill_level, "Не указаны")
         
         user_id = str(interaction.user.id)
         
@@ -259,26 +253,19 @@ class SkillModal(Modal):
             )
             return
         
-        # Добавляем участника
         contracts[self.contract_id]["members"][user_id] = {
             "name": interaction.user.display_name,
-            "weak": self.skill_weak.value or "Не указаны",
-            "medium": self.skill_medium.value or "Не указаны",
-            "strong": self.skill_strong.value or "Не указаны"
+            "skill": skill_text
         }
         
-        print(f"✅ Участник добавлен: {interaction.user.display_name}")
+        print(f"✅ Участник добавлен: {interaction.user.display_name} ({skill_text})")
         print(f"📊 Всего участников: {len(contracts[self.contract_id]['members'])}")
         
         await interaction.response.send_message(
-            f"✅ Вы записались на контракт!\n"
-            f"🔹 Слабые: {self.skill_weak.value or 'Не указаны'}\n"
-            f"🔸 Средние: {self.skill_medium.value or 'Не указаны'}\n"
-            f"🔺 Сильные: {self.skill_strong.value or 'Не указаны'}",
+            f"✅ Вы записались на контракт с навыками: **{skill_text}**!",
             ephemeral=True
         )
         
-        # Проверяем, набралось ли 3 человека
         if len(contracts[self.contract_id]["members"]) >= 3:
             await finish_contract(self.contract_id)
 
@@ -309,8 +296,12 @@ class ContractJoinButton(Button):
             )
             return
         
-        # Открываем окно с навыками
-        await interaction.response.send_modal(SkillModal(self.contract_id))
+        view = SkillSelectView(self.contract_id)
+        await interaction.response.send_message(
+            "📝 **Выберите уровень ваших навыков:**",
+            view=view,
+            ephemeral=True
+        )
 
 # --- Функция завершения контракта ---
 async def finish_contract(contract_id: str):
@@ -344,9 +335,7 @@ async def finish_contract(contract_id: str):
     for user_id, data in members.items():
         member_list.append(
             f"**{data['name']}**\n"
-            f"  🔹 Слабые: {data['weak']}\n"
-            f"  🔸 Средние: {data['medium']}\n"
-            f"  🔺 Сильные: {data['strong']}"
+            f"  📊 Навыки: {data['skill']}"
         )
     
     embed.add_field(
@@ -357,7 +346,10 @@ async def finish_contract(contract_id: str):
     
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
-        msg = await channel.send(content="@Контракт", embed=embed)
+        msg = await channel.send(
+            content="@Контракт @everyone",  # <-- ТЕГИ @Контракт и @everyone
+            embed=embed
+        )
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
     
     del contracts[contract_id]
@@ -450,7 +442,6 @@ class FreeButtonsView(View):
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     
-    # Проверяем каналы
     for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин")]:
         if channel_id:
             channel = client.get_channel(channel_id)
@@ -459,7 +450,6 @@ async def on_ready():
             else:
                 print(f'❌ КАНАЛ {name} (ID: {channel_id}) НЕ НАЙДЕН!')
     
-    # Синхронизация команд
     try:
         guild = discord.Object(id=GUILD_ID)
         await tree.sync(guild=guild)
@@ -469,13 +459,12 @@ async def on_ready():
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
     
-    # Запуск канала с машинами
     if CAR_CHANNEL_ID:
         await update_cars_channel()
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contract (полная копия /contr) ---
+# --- КОМАНДА: /contract ---
 @tree.command(
     name="contract", 
     description="Создать новый контракт",
@@ -489,7 +478,6 @@ async def contract_command(interaction: discord.Interaction, name: str):
     print(f"🔵 Название: {name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     
-    # Проверяем канал
     if interaction.channel_id != CONTRACT_CHANNEL_ID:
         await interaction.response.send_message(
             f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
@@ -497,7 +485,6 @@ async def contract_command(interaction: discord.Interaction, name: str):
         )
         return
     
-    # Проверяем, что канал существует
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel is None:
         await interaction.response.send_message(
@@ -508,7 +495,6 @@ async def contract_command(interaction: discord.Interaction, name: str):
     
     print(f"✅ Канал найден: {channel.name}")
     
-    # Создаем контракт
     contract_id = f"{interaction.user.id}_{int(datetime.datetime.now().timestamp())}"
     
     contracts[contract_id] = {
@@ -521,11 +507,9 @@ async def contract_command(interaction: discord.Interaction, name: str):
     
     print(f"✅ Контракт создан: {contract_id}")
     
-    # Создаем кнопку
     view = View(timeout=None)
     view.add_item(ContractJoinButton(contract_id))
     
-    # Создаем Embed
     embed = discord.Embed(
         title="📋 Новый контракт",
         description=f"**{name}**",
@@ -535,13 +519,12 @@ async def contract_command(interaction: discord.Interaction, name: str):
     embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
     embed.add_field(name="Время на сбор", value="5 минут", inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
-    embed.add_field(name="Требования", value="Укажите навыки: слабые, средние, сильные", inline=False)
+    embed.add_field(name="Требования", value="Выберите уровень навыков: Слабые / Средние / Сильные", inline=False)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
     
-    # Отправляем сообщение в канал
     try:
         sent_message = await channel.send(
-            content="@Контракт",
+            content="@Контракт @everyone",  # <-- ТЕГИ @Контракт и @everyone
             embed=embed,
             view=view
         )
@@ -556,7 +539,6 @@ async def contract_command(interaction: discord.Interaction, name: str):
             del contracts[contract_id]
         return
     
-    # Запускаем таймер
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
@@ -564,7 +546,6 @@ async def contract_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"❌ Ошибка при запуске таймера: {e}")
     
-    # Отвечаем пользователю
     try:
         await interaction.response.send_message(
             f"✅ Контракт **{name}** успешно создан!",
@@ -588,7 +569,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
     print(f"🔵 Название: {name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     
-    # Проверяем канал
     if interaction.channel_id != CONTRACT_CHANNEL_ID:
         await interaction.response.send_message(
             f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
@@ -596,7 +576,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
         )
         return
     
-    # Проверяем, что канал существует
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel is None:
         await interaction.response.send_message(
@@ -607,7 +586,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
     
     print(f"✅ Канал найден: {channel.name}")
     
-    # Создаем контракт
     contract_id = f"{interaction.user.id}_{int(datetime.datetime.now().timestamp())}"
     
     contracts[contract_id] = {
@@ -620,11 +598,9 @@ async def contr_command(interaction: discord.Interaction, name: str):
     
     print(f"✅ Контракт создан: {contract_id}")
     
-    # Создаем кнопку
     view = View(timeout=None)
     view.add_item(ContractJoinButton(contract_id))
     
-    # Создаем Embed
     embed = discord.Embed(
         title="📋 Новый контракт",
         description=f"**{name}**",
@@ -634,13 +610,12 @@ async def contr_command(interaction: discord.Interaction, name: str):
     embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
     embed.add_field(name="Время на сбор", value="5 минут", inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
-    embed.add_field(name="Требования", value="Укажите навыки: слабые, средние, сильные", inline=False)
+    embed.add_field(name="Требования", value="Выберите уровень навыков: Слабые / Средние / Сильные", inline=False)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
     
-    # Отправляем сообщение в канал
     try:
         sent_message = await channel.send(
-            content="@Контракт",
+            content="@Контракт @everyone",  # <-- ТЕГИ @Контракт и @everyone
             embed=embed,
             view=view
         )
@@ -655,7 +630,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
             del contracts[contract_id]
         return
     
-    # Запускаем таймер
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
@@ -663,7 +637,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"❌ Ошибка при запуске таймера: {e}")
     
-    # Отвечаем пользователю
     try:
         await interaction.response.send_message(
             f"✅ Контракт **{name}** успешно создан!",
