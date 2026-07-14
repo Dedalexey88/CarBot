@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput
 import datetime
+import asyncio
 
 # --- Данные о машинах (7 штук) ---
 cars = {
@@ -36,6 +37,34 @@ async def send_log(message: str, embed: discord.Embed = None):
     else:
         await channel.send(message)
 
+# --- Функция для освобождения машины ---
+async def free_car_auto(car_name: str):
+    """Автоматически освобождает машину и отправляет уведомление."""
+    if car_name not in cars:
+        return
+    
+    if cars[car_name]["status"] == "Свободна":
+        return
+    
+    user_name = cars[car_name]["user"]
+    
+    # Освобождаем машину
+    cars[car_name]["status"] = "Свободна"
+    cars[car_name]["user"] = None
+    cars[car_name]["end_time"] = None
+    
+    # Отправляем уведомление в лог-канал
+    embed = discord.Embed(
+        title="⏰ Машина автоматически освобождена",
+        description=f"**{car_name}**",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="Кто взял", value=user_name, inline=True)
+    embed.add_field(name="Причина", value="Время истекло", inline=True)
+    embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
+    
+    await send_log(f"⏰ **{user_name}** время вышло, машина **{car_name}** освобождена", embed=embed)
+
 # --- Функция для создания списка машин ---
 def generate_car_list():
     lines = ["**🚗 Список машин:**"]
@@ -60,14 +89,79 @@ def generate_car_list():
     
     return "\n".join(lines)
 
-# --- Модальное окно для ввода времени ---
+# --- Кнопки быстрого выбора времени ---
+class TimeButtonsView(View):
+    def __init__(self, car_name: str):
+        super().__init__(timeout=60)
+        self.car_name = car_name
+    
+    @discord.ui.button(label="15 мин", style=discord.ButtonStyle.primary)
+    async def time_15(self, interaction: discord.Interaction, button: Button):
+        await self.take_car(interaction, 15)
+    
+    @discord.ui.button(label="30 мин", style=discord.ButtonStyle.primary)
+    async def time_30(self, interaction: discord.Interaction, button: Button):
+        await self.take_car(interaction, 30)
+    
+    @discord.ui.button(label="45 мин", style=discord.ButtonStyle.primary)
+    async def time_45(self, interaction: discord.Interaction, button: Button):
+        await self.take_car(interaction, 45)
+    
+    @discord.ui.button(label="60 мин", style=discord.ButtonStyle.primary)
+    async def time_60(self, interaction: discord.Interaction, button: Button):
+        await self.take_car(interaction, 60)
+    
+    @discord.ui.button(label="90 мин", style=discord.ButtonStyle.primary)
+    async def time_90(self, interaction: discord.Interaction, button: Button):
+        await self.take_car(interaction, 90)
+    
+    @discord.ui.button(label="120 мин", style=discord.ButtonStyle.primary)
+    async def time_120(self, interaction: discord.Interaction, button: Button):
+        await self.take_car(interaction, 120)
+    
+    async def take_car(self, interaction: discord.Interaction, minutes: int):
+        if cars[self.car_name]["status"] == "Занята":
+            await interaction.response.send_message(
+                f"❌ Машина '{self.car_name}' уже занята!",
+                ephemeral=True
+            )
+            return
+        
+        user_name = interaction.user.display_name
+        end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
+        
+        cars[self.car_name]["status"] = "Занята"
+        cars[self.car_name]["user"] = user_name
+        cars[self.car_name]["end_time"] = end_time
+        
+        # Запускаем таймер для автоматического освобождения
+        asyncio.create_task(auto_free_timer(self.car_name, minutes))
+        
+        embed = discord.Embed(
+            title="🚗 Машина взята",
+            description=f"**{self.car_name}**",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Кто взял", value=user_name, inline=True)
+        embed.add_field(name="Время", value=f"{minutes} минут", inline=True)
+        embed.add_field(name="До", value=end_time.strftime("%H:%M"), inline=True)
+        embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
+        
+        await send_log(f"✅ **{user_name}** взял машину **{self.car_name}**", embed=embed)
+        
+        await interaction.response.send_message(
+            f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
+            ephemeral=False
+        )
+
+# --- Модальное окно для ручного ввода времени ---
 class TimeModal(Modal):
     def __init__(self, car_name: str):
         super().__init__(title=f"Взять машину: {car_name}")
         self.car_name = car_name
         
         self.time_input = TextInput(
-            label="Время в минутах (15-120)",
+            label="Время в минутах (1-120)",
             placeholder="Например: 30",
             min_length=1,
             max_length=3,
@@ -78,9 +172,9 @@ class TimeModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             minutes = int(self.time_input.value)
-            if minutes < 15 or minutes > 120:
+            if minutes < 1 or minutes > 120:
                 await interaction.response.send_message(
-                    "❌ Время должно быть от 15 до 120 минут!",
+                    "❌ Время должно быть от 1 до 120 минут!",
                     ephemeral=True
                 )
                 return
@@ -98,6 +192,9 @@ class TimeModal(Modal):
             cars[self.car_name]["status"] = "Занята"
             cars[self.car_name]["user"] = user_name
             cars[self.car_name]["end_time"] = end_time
+            
+            # Запускаем таймер для автоматического освобождения
+            asyncio.create_task(auto_free_timer(self.car_name, minutes))
             
             embed = discord.Embed(
                 title="🚗 Машина взята",
@@ -121,6 +218,15 @@ class TimeModal(Modal):
                 "❌ Введите число!",
                 ephemeral=True
             )
+
+# --- Автоматический таймер для освобождения машины ---
+async def auto_free_timer(car_name: str, minutes: int):
+    """Ждет указанное время и освобождает машину."""
+    await asyncio.sleep(minutes * 60)  # Переводим минуты в секунды
+    
+    # Проверяем, не освободили ли машину раньше
+    if car_name in cars and cars[car_name]["status"] == "Занята":
+        await free_car_auto(car_name)
 
 # --- Модальное окно для добавления машины ---
 class AddCarModal(Modal):
@@ -197,7 +303,7 @@ class CarButtonsView(View):
         
         car_list = list(cars.keys())
         
-        for i, car_name in enumerate(car_list[:7]):  # Только 7 машин
+        for i, car_name in enumerate(car_list[:7]):
             label = car_name[:25] + "..." if len(car_name) > 25 else car_name
             button = Button(label=label, style=discord.ButtonStyle.success, custom_id=f"car_{i}")
             button.callback = self.create_callback(car_name)
@@ -211,7 +317,24 @@ class CarButtonsView(View):
                     ephemeral=True
                 )
                 return
-            await interaction.response.send_modal(TimeModal(car_name))
+            
+            # Создаем View с кнопками времени
+            view = TimeButtonsView(car_name)
+            
+            # Добавляем кнопку для ручного ввода
+            manual_button = Button(label="✏️ Своё время", style=discord.ButtonStyle.secondary)
+            
+            async def manual_callback(interaction: discord.Interaction):
+                await interaction.response.send_modal(TimeModal(car_name))
+            
+            manual_button.callback = manual_callback
+            view.add_item(manual_button)
+            
+            await interaction.response.send_message(
+                f"🚗 **{car_name}**\nВыберите время или введите своё:",
+                view=view,
+                ephemeral=True
+            )
         return callback
 
 # --- Кнопки освобождения (7 штук) ---
@@ -221,7 +344,7 @@ class FreeButtonsView(View):
         
         car_list = list(cars.keys())
         
-        for i, car_name in enumerate(car_list[:7]):  # Только 7 машин
+        for i, car_name in enumerate(car_list[:7]):
             label = car_name[:25] + "..." if len(car_name) > 25 else car_name
             button = Button(label=f"🗑️ {label}", style=discord.ButtonStyle.danger, custom_id=f"free_{i}")
             button.callback = self.create_callback(car_name)
@@ -346,12 +469,12 @@ async def list_cars_command(interaction: discord.Interaction):
 @tree.command(name="take", description="Взять машину на определенное время")
 @app_commands.describe(
     car_name="Название машины",
-    minutes="Время в минутах (от 15 до 120)"
+    minutes="Время в минутах (от 1 до 120)"
 )
 async def take_command(
     interaction: discord.Interaction, 
     car_name: str, 
-    minutes: app_commands.Range[int, 15, 120]
+    minutes: app_commands.Range[int, 1, 120]
 ):
     if car_name not in cars:
         await interaction.response.send_message(
@@ -373,6 +496,9 @@ async def take_command(
     cars[car_name]["status"] = "Занята"
     cars[car_name]["user"] = user_name
     cars[car_name]["end_time"] = end_time
+
+    # Запускаем таймер для автоматического освобождения
+    asyncio.create_task(auto_free_timer(car_name, minutes))
 
     embed = discord.Embed(
         title="🚗 Машина взята",
