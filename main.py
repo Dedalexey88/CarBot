@@ -276,6 +276,49 @@ class TimeButtonsView(View):
         
         await update_cars_channel()
 
+# --- Функция для обновления сообщения с контрактом ---
+async def update_contract_message(contract_id: str):
+    """Обновляет сообщение с контрактом, показывая актуальный список участников."""
+    if contract_id not in contracts:
+        return
+    
+    contract_data = contracts[contract_id]
+    members = contract_data["members"]
+    
+    # Формируем список участников
+    member_list = "\n".join([f"• {data['name']} - {data['skill']}" for data in members.values()]) if members else "🔴 Нет участников"
+    
+    embed = discord.Embed(
+        title="📋 Контракт",
+        description=f"**{contract_data['name']}**",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Создал", value=contract_data['author'], inline=True)
+    embed.add_field(name="Статус", value=f"⏳ Набор участников ({len(members)}/3)", inline=True)
+    embed.add_field(name="Время на сбор", value="5 минут", inline=True)
+    embed.add_field(name="Минимум", value="2 человека", inline=True)
+    embed.add_field(
+        name=f"👥 Участники ({len(members)} человек)",
+        value=member_list,
+        inline=False
+    )
+    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться или отказаться")
+    
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
+    view.add_item(CancelContractButton(contract_id))
+    
+    # Обновляем сообщение
+    channel = client.get_channel(CONTRACT_CHANNEL_ID)
+    if channel and "message_id" in contract_data:
+        try:
+            msg = await channel.fetch_message(contract_data["message_id"])
+            await msg.edit(content="@Контракт @everyone", embed=embed, view=view)
+        except:
+            # Если сообщение не найдено, создаем новое
+            msg = await channel.send(content="@Контракт @everyone", embed=embed, view=view)
+            contract_data["message_id"] = msg.id
+
 # --- Модальное окно с выбором навыков ---
 class SkillSelectView(View):
     def __init__(self, contract_id: str):
@@ -327,11 +370,11 @@ class SkillSelectView(View):
         print(f"✅ Участник добавлен: {interaction.user.display_name} ({skill_text})")
         print(f"📊 Всего участников: {len(contracts[self.contract_id]['members'])}")
         
-        # Показываем обновленный список
-        member_list = "\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()])
+        # Обновляем сообщение с контрактом для всех
+        await update_contract_message(self.contract_id)
+        
         await interaction.response.send_message(
-            f"✅ Вы записались на контракт с навыками: **{skill_text}**!\n\n"
-            f"📋 **Текущий список участников:**\n{member_list if member_list else '🔴 Нет участников'}",
+            f"✅ Вы записались на контракт с навыками: **{skill_text}**!",
             ephemeral=True
         )
         
@@ -368,10 +411,11 @@ class CancelContractButton(Button):
         # Удаляем участника
         del contracts[self.contract_id]["members"][user_id]
         
-        member_list = "\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()])
+        # Обновляем сообщение с контрактом для всех
+        await update_contract_message(self.contract_id)
+        
         await interaction.response.send_message(
-            f"❌ Вы отказались от выполнения контракта!\n\n"
-            f"📋 **Текущий список участников:**\n{member_list if member_list else '🔴 Нет участников'}",
+            f"❌ Вы отказались от выполнения контракта!",
             ephemeral=True
         )
 
@@ -402,13 +446,11 @@ class ContractJoinButton(Button):
             )
             return
         
-        # Создаем View с выбором навыков и кнопкой отказа
+        # Создаем View с выбором навыков
         view = SkillSelectView(self.contract_id)
-        view.add_item(CancelContractButton(self.contract_id))
         
         await interaction.response.send_message(
-            "📝 **Выберите уровень ваших навыков:**\n"
-            "Или нажмите 'Отказаться', если передумали.",
+            "📝 **Выберите уровень ваших навыков:**",
             view=view,
             ephemeral=True
         )
@@ -676,7 +718,7 @@ async def on_ready():
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contr (основная команда для контрактов) ---
+# --- КОМАНДА: /contr ---
 @tree.command(
     name="contr", 
     description="Создать новый контракт",
@@ -714,17 +756,15 @@ async def contr_command(interaction: discord.Interaction, name: str):
         "author": interaction.user.display_name,
         "author_id": str(interaction.user.id),
         "members": {},
-        "created_at": datetime.datetime.now()
+        "created_at": datetime.datetime.now(),
+        "message_id": None  # Будет сохранен ID сообщения
     }
     
     print(f"✅ Контракт создан: {contract_id}")
     
-    view = View(timeout=None)
-    view.add_item(ContractJoinButton(contract_id))
-    view.add_item(CancelContractButton(contract_id))
-    
+    # Создаем начальное сообщение
     embed = discord.Embed(
-        title="📋 Новый контракт",
+        title="📋 Контракт",
         description=f"**{name}**",
         color=discord.Color.blue()
     )
@@ -732,8 +772,11 @@ async def contr_command(interaction: discord.Interaction, name: str):
     embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
     embed.add_field(name="Время на сбор", value="5 минут", inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
-    embed.add_field(name="Требования", value="Выберите уровень навыков: Слабые / Средние / Сильные", inline=False)
+    embed.add_field(name="👥 Участники (0 человек)", value="🔴 Нет участников", inline=False)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
+    
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
     
     try:
         sent_message = await channel.send(
@@ -741,6 +784,7 @@ async def contr_command(interaction: discord.Interaction, name: str):
             embed=embed,
             view=view
         )
+        contracts[contract_id]["message_id"] = sent_message.id
         print(f"✅ Сообщение отправлено: {sent_message.id}")
     except Exception as e:
         print(f"❌ Ошибка при отправке сообщения: {e}")
@@ -751,6 +795,12 @@ async def contr_command(interaction: discord.Interaction, name: str):
         if contract_id in contracts:
             del contracts[contract_id]
         return
+    
+    # Добавляем кнопку отказа в сообщение (после того как сообщение создано)
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
+    view.add_item(CancelContractButton(contract_id))
+    await sent_message.edit(view=view)
     
     try:
         task = asyncio.create_task(contract_timer(contract_id))
