@@ -32,13 +32,18 @@ contracts = {}
 
 # --- Данные для VZP ---
 vzp_data = {
-    "members": {},
-    "message_id": None,
+    "attack_members": {},
+    "defense_members": {},
+    "attack_message_id": None,
+    "defense_message_id": None,
     "channel_id": VZP_CHANNEL_ID,
-    "target_count": 0,
+    "attack_target": 0,
+    "defense_target": 0,
     "is_completed": False,
     "last_reminder_time": None,
-    "reminder_task": None
+    "reminder_task": None,
+    "attack_completed": False,
+    "defense_completed": False
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -589,125 +594,256 @@ class FreeButtonsView(View):
             await update_cars_channel()
         return callback
 
-# --- Кнопки для VZP (с выбором атака/защита) ---
-class VZPSelectView(View):
+# --- Кнопки для VZP ---
+class VZPAtkJoinButton(Button):
     def __init__(self):
-        super().__init__(timeout=60)
-        
-        self.select = Select(
-            placeholder="Выберите роль",
-            options=[
-                discord.SelectOption(label="⚔️ Атака", value="attack", description="Меч / Оружие"),
-                discord.SelectOption(label="🛡️ Защита", value="defense", description="Щит"),
-            ]
+        super().__init__(
+            label="⚔️ Записаться в атаку",
+            style=discord.ButtonStyle.success,
+            custom_id="vzp_atk_join"
         )
-        self.select.callback = self.select_callback
-        self.add_item(self.select)
     
-    async def select_callback(self, interaction: discord.Interaction):
-        if vzp_data["is_completed"]:
+    async def callback(self, interaction: discord.Interaction):
+        if vzp_data["is_completed"] or vzp_data["attack_completed"]:
             await interaction.response.send_message(
-                "❌ Сбор уже завершен!",
+                "❌ Сбор на атаку уже завершен!",
                 ephemeral=True
             )
             return
-        
-        role = self.select.values[0]
-        
-        role_names = {
-            "attack": "⚔️ Атака",
-            "defense": "🛡️ Защита"
-        }
-        role_text = role_names.get(role, "Не указана")
         
         user_id = str(interaction.user.id)
         
-        if user_id in vzp_data["members"]:
+        if user_id in vzp_data["attack_members"]:
             await interaction.response.send_message(
-                "❌ Вы уже записаны на ВСку!",
+                "❌ Вы уже записаны в атаку!",
                 ephemeral=True
             )
             return
         
-        vzp_data["members"][user_id] = {
-            "name": interaction.user.display_name,
-            "role": role_text
+        # Проверяем, не записан ли уже в защиту
+        if user_id in vzp_data["defense_members"]:
+            await interaction.response.send_message(
+                "❌ Вы уже записаны в защиту! Нельзя быть в обеих командах.",
+                ephemeral=True
+            )
+            return
+        
+        vzp_data["attack_members"][user_id] = {
+            "name": interaction.user.display_name
         }
         
         await interaction.response.send_message(
-            f"✅ Вы записались на ВСку с ролью: **{role_text}**!",
+            f"✅ Вы записались в **атаку**!",
             ephemeral=True
         )
+        
+        await update_vzp_messages()
+
+class VZPAtkLeaveButton(Button):
+    def __init__(self):
+        super().__init__(
+            label="❌ Отписаться из атаки",
+            style=discord.ButtonStyle.danger,
+            custom_id="vzp_atk_leave"
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        if vzp_data["is_completed"] or vzp_data["attack_completed"]:
+            await interaction.response.send_message(
+                "❌ Сбор на атаку уже завершен!",
+                ephemeral=True
+            )
+            return
+        
+        user_id = str(interaction.user.id)
+        
+        if user_id not in vzp_data["attack_members"]:
+            await interaction.response.send_message(
+                "❌ Вы не записаны в атаку!",
+                ephemeral=True
+            )
+            return
+        
+        del vzp_data["attack_members"][user_id]
+        
+        await interaction.response.send_message(
+            f"❌ Вы отписались из атаки!",
+            ephemeral=True
+        )
+        
+        await update_vzp_messages()
+
+class VZPDefJoinButton(Button):
+    def __init__(self):
+        super().__init__(
+            label="🛡️ Записаться в защиту",
+            style=discord.ButtonStyle.success,
+            custom_id="vzp_def_join"
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        if vzp_data["is_completed"] or vzp_data["defense_completed"]:
+            await interaction.response.send_message(
+                "❌ Сбор на защиту уже завершен!",
+                ephemeral=True
+            )
+            return
+        
+        user_id = str(interaction.user.id)
+        
+        if user_id in vzp_data["defense_members"]:
+            await interaction.response.send_message(
+                "❌ Вы уже записаны в защиту!",
+                ephemeral=True
+            )
+            return
+        
+        # Проверяем, не записан ли уже в атаку
+        if user_id in vzp_data["attack_members"]:
+            await interaction.response.send_message(
+                "❌ Вы уже записаны в атаку! Нельзя быть в обеих командах.",
+                ephemeral=True
+            )
+            return
+        
+        vzp_data["defense_members"][user_id] = {
+            "name": interaction.user.display_name
+        }
+        
+        await interaction.response.send_message(
+            f"✅ Вы записались в **защиту**!",
+            ephemeral=True
+        )
+        
+        await update_vzp_messages()
+
+class VZPDefLeaveButton(Button):
+    def __init__(self):
+        super().__init__(
+            label="❌ Отписаться из защиты",
+            style=discord.ButtonStyle.danger,
+            custom_id="vzp_def_leave"
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        if vzp_data["is_completed"] or vzp_data["defense_completed"]:
+            await interaction.response.send_message(
+                "❌ Сбор на защиту уже завершен!",
+                ephemeral=True
+            )
+            return
+        
+        user_id = str(interaction.user.id)
+        
+        if user_id not in vzp_data["defense_members"]:
+            await interaction.response.send_message(
+                "❌ Вы не записаны в защиту!",
+                ephemeral=True
+            )
+            return
+        
+        del vzp_data["defense_members"][user_id]
+        
+        await interaction.response.send_message(
+            f"❌ Вы отписались из защиты!",
+            ephemeral=True
+        )
+        
+        await update_vzp_messages()
+
+# --- Обновление сообщений VZP ---
+async def update_vzp_messages():
+    channel = client.get_channel(VZP_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал VZP не найден!")
+        return
+    
+    # --- Обновляем сообщение для атаки ---
+    if not vzp_data["attack_completed"] and vzp_data["attack_target"] > 0:
+        attack_list = "\n".join([f"• {data['name']}" for data in vzp_data["attack_members"].values()]) if vzp_data["attack_members"] else "🔴 Нет участников"
+        
+        embed_atk = discord.Embed(
+            title="⚔️ Сбор на Атаку",
+            description=f"**Нужно: {vzp_data['attack_target']} человек**",
+            color=discord.Color.red()
+        )
+        embed_atk.add_field(
+            name=f"👥 Участники ({len(vzp_data['attack_members'])}/{vzp_data['attack_target']})",
+            value=attack_list,
+            inline=False
+        )
+        embed_atk.set_footer(text="Нажмите кнопку, чтобы записаться или отписаться")
+        
+        view_atk = View(timeout=None)
+        view_atk.add_item(VZPAtkJoinButton())
+        view_atk.add_item(VZPAtkLeaveButton())
+        
+        if vzp_data["attack_message_id"]:
+            try:
+                msg = await channel.fetch_message(vzp_data["attack_message_id"])
+                await msg.edit(content="@everyone", embed=embed_atk, view=view_atk)
+            except:
+                msg = await channel.send(content="@everyone", embed=embed_atk, view=view_atk)
+                vzp_data["attack_message_id"] = msg.id
+        else:
+            msg = await channel.send(content="@everyone", embed=embed_atk, view=view_atk)
+            vzp_data["attack_message_id"] = msg.id
         
         # Проверяем, собралось ли нужное количество
-        if len(vzp_data["members"]) >= vzp_data["target_count"]:
-            await complete_vzp()
-
-class VZPJoinButton(Button):
-    def __init__(self):
-        super().__init__(
-            label="✅ Записаться на ВСку",
-            style=discord.ButtonStyle.success,
-            custom_id="vzp_join"
-        )
+        if len(vzp_data["attack_members"]) >= vzp_data["attack_target"]:
+            vzp_data["attack_completed"] = True
+            # Удаляем сообщение с кнопками
+            try:
+                msg = await channel.fetch_message(vzp_data["attack_message_id"])
+                await msg.delete()
+                vzp_data["attack_message_id"] = None
+            except:
+                pass
     
-    async def callback(self, interaction: discord.Interaction):
-        if vzp_data["is_completed"]:
-            await interaction.response.send_message(
-                "❌ Сбор уже завершен!",
-                ephemeral=True
-            )
-            return
+    # --- Обновляем сообщение для защиты ---
+    if not vzp_data["defense_completed"] and vzp_data["defense_target"] > 0:
+        defense_list = "\n".join([f"• {data['name']}" for data in vzp_data["defense_members"].values()]) if vzp_data["defense_members"] else "🔴 Нет участников"
         
-        user_id = str(interaction.user.id)
-        
-        if user_id in vzp_data["members"]:
-            await interaction.response.send_message(
-                "❌ Вы уже записаны на ВСку!",
-                ephemeral=True
-            )
-            return
-        
-        view = VZPSelectView()
-        await interaction.response.send_message(
-            "📝 **Выберите вашу роль:**",
-            view=view,
-            ephemeral=True
+        embed_def = discord.Embed(
+            title="🛡️ Сбор на Защиту",
+            description=f"**Нужно: {vzp_data['defense_target']} человек**",
+            color=discord.Color.blue()
         )
-
-class VZPLeaveButton(Button):
-    def __init__(self):
-        super().__init__(
-            label="❌ Отписаться от ВСки",
-            style=discord.ButtonStyle.danger,
-            custom_id="vzp_leave"
+        embed_def.add_field(
+            name=f"👥 Участники ({len(vzp_data['defense_members'])}/{vzp_data['defense_target']})",
+            value=defense_list,
+            inline=False
         )
+        embed_def.set_footer(text="Нажмите кнопку, чтобы записаться или отписаться")
+        
+        view_def = View(timeout=None)
+        view_def.add_item(VZPDefJoinButton())
+        view_def.add_item(VZPDefLeaveButton())
+        
+        if vzp_data["defense_message_id"]:
+            try:
+                msg = await channel.fetch_message(vzp_data["defense_message_id"])
+                await msg.edit(content="@everyone", embed=embed_def, view=view_def)
+            except:
+                msg = await channel.send(content="@everyone", embed=embed_def, view=view_def)
+                vzp_data["defense_message_id"] = msg.id
+        else:
+            msg = await channel.send(content="@everyone", embed=embed_def, view=view_def)
+            vzp_data["defense_message_id"] = msg.id
+        
+        # Проверяем, собралось ли нужное количество
+        if len(vzp_data["defense_members"]) >= vzp_data["defense_target"]:
+            vzp_data["defense_completed"] = True
+            try:
+                msg = await channel.fetch_message(vzp_data["defense_message_id"])
+                await msg.delete()
+                vzp_data["defense_message_id"] = None
+            except:
+                pass
     
-    async def callback(self, interaction: discord.Interaction):
-        if vzp_data["is_completed"]:
-            await interaction.response.send_message(
-                "❌ Сбор уже завершен! Нельзя отписаться.",
-                ephemeral=True
-            )
-            return
-        
-        user_id = str(interaction.user.id)
-        
-        if user_id not in vzp_data["members"]:
-            await interaction.response.send_message(
-                "❌ Вы не записаны на ВСку!",
-                ephemeral=True
-            )
-            return
-        
-        del vzp_data["members"][user_id]
-        
-        await interaction.response.send_message(
-            f"❌ Вы отписались от ВСки!",
-            ephemeral=True
-        )
-        
-        await update_vzp_message()
+    # Проверяем, собраны ли обе команды
+    if vzp_data["attack_completed"] and vzp_data["defense_completed"] and not vzp_data["is_completed"]:
+        await complete_vzp()
 
 # --- Завершение сбора VZP ---
 async def complete_vzp():
@@ -722,14 +858,8 @@ async def complete_vzp():
         vzp_data["reminder_task"] = None
     
     # Формируем финальный список участников
-    attack_list = []
-    defense_list = []
-    
-    for data in vzp_data["members"].values():
-        if "Атака" in data['role']:
-            attack_list.append(data['name'])
-        else:
-            defense_list.append(data['name'])
+    attack_list = [data['name'] for data in vzp_data["attack_members"].values()]
+    defense_list = [data['name'] for data in vzp_data["defense_members"].values()]
     
     embed = discord.Embed(
         title="⚔️ Реакции собраны!",
@@ -741,18 +871,18 @@ async def complete_vzp():
     defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "Нет"
     
     embed.add_field(
-        name=f"⚔️ Атака ({len(attack_list)} человек)",
+        name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
         value=attack_text,
         inline=True
     )
     embed.add_field(
-        name=f"🛡️ Защита ({len(defense_list)} человек)",
+        name=f"🛡️ Защита ({len(defense_list)}/{vzp_data['defense_target']})",
         value=defense_text,
         inline=True
     )
     embed.add_field(
         name=f"👥 Всего участников",
-        value=f"{len(vzp_data['members'])} человек",
+        value=f"{len(attack_list) + len(defense_list)} человек",
         inline=True
     )
     embed.set_footer(text="Удачи! 🎯")
@@ -760,127 +890,49 @@ async def complete_vzp():
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel:
         await channel.send(content="@everyone", embed=embed)
-        
-        if vzp_data["message_id"]:
-            try:
-                msg = await channel.fetch_message(vzp_data["message_id"])
-                await msg.delete()
-            except:
-                pass
 
 # --- Функция проверки времени для напоминаний ---
 def should_send_reminder():
-    """Проверяет, можно ли отправлять напоминание (с 12:00 до 2:00)"""
     now = datetime.datetime.now(MOSCOW_TZ)
     hour = now.hour
-    
-    # Не отправляем с 2:00 до 12:00
     if hour >= 2 and hour < 12:
         return False
     return True
 
 # --- Функция напоминания ---
 async def send_reminder():
-    """Отправляет напоминание о сборе"""
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel is None:
         return
     
-    # Проверяем, не завершен ли сбор
     if vzp_data["is_completed"]:
         return
     
-    # Проверяем, можно ли отправлять напоминание
     if not should_send_reminder():
-        print(f"⏰ Напоминание пропущено (ночное время 2:00-12:00)")
         return
     
-    # Проверяем, не было ли отправлено напоминание менее 2 часов назад
     if vzp_data["last_reminder_time"]:
         time_diff = (datetime.datetime.now() - vzp_data["last_reminder_time"]).total_seconds()
-        if time_diff < 7200:  # 2 часа в секундах
+        if time_diff < 7200:
             return
     
-    # Отправляем напоминание
     await channel.send(
         "⏰ **Парни прошло 2 часа, как вы не забивали вску, не пора ли собрать и навалять?**\n"
-        f"Используйте `/vzp {vzp_data['target_count']}` для сбора реакций {vzp_data['target_count']}x{vzp_data['target_count']}!"
+        f"Используйте `/vzp_atk {vzp_data['attack_target']}` и `/vzp_def {vzp_data['defense_target']}` для сбора реакций!"
     )
     
     vzp_data["last_reminder_time"] = datetime.datetime.now()
-    print(f"✅ Напоминание отправлено в {datetime.datetime.now().strftime('%H:%M')}")
 
 # --- Фоновый цикл напоминаний ---
 async def reminder_loop():
-    """Фоновый цикл, проверяющий каждые 10 минут необходимость отправки напоминания"""
     await client.wait_until_ready()
-    
     while not client.is_closed():
         try:
-            # Проверяем, есть ли активный сбор
-            if not vzp_data["is_completed"] and vzp_data["target_count"] > 0:
+            if not vzp_data["is_completed"] and (vzp_data["attack_target"] > 0 or vzp_data["defense_target"] > 0):
                 await send_reminder()
         except Exception as e:
             print(f"❌ Ошибка в цикле напоминаний: {e}")
-        
-        # Ждем 10 минут перед следующей проверкой
-        await asyncio.sleep(600)  # 10 минут
-
-# --- Обновление сообщения VZP ---
-async def update_vzp_message():
-    if vzp_data["is_completed"]:
-        return
-    
-    channel = client.get_channel(VZP_CHANNEL_ID)
-    if channel is None:
-        print(f"❌ Канал VZP не найден!")
-        return
-    
-    # Формируем список участников с ролями
-    member_list = []
-    for data in vzp_data["members"].values():
-        member_list.append(f"• {data['name']} - {data['role']}")
-    
-    member_text = "\n".join(member_list) if member_list else "🔴 Нет участников"
-    
-    # Подсчет атаки и защиты
-    attack_count = sum(1 for data in vzp_data["members"].values() if "Атака" in data['role'])
-    defense_count = sum(1 for data in vzp_data["members"].values() if "Защита" in data['role'])
-    
-    target = vzp_data["target_count"]
-    current = len(vzp_data["members"])
-    
-    embed = discord.Embed(
-        title="⚔️ VZP - Сбор на ВСку",
-        description=f"**Атака и Защита**",
-        color=discord.Color.blue()
-    )
-    embed.add_field(
-        name=f"⚔️ Атака ({attack_count} человек) | 🛡️ Защита ({defense_count} человек)",
-        value=member_text,
-        inline=False
-    )
-    embed.add_field(
-        name="📊 Прогресс",
-        value=f"{current}/{target} человек",
-        inline=False
-    )
-    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться или отписаться")
-    
-    view = View(timeout=None)
-    view.add_item(VZPJoinButton())
-    view.add_item(VZPLeaveButton())
-    
-    if vzp_data["message_id"]:
-        try:
-            msg = await channel.fetch_message(vzp_data["message_id"])
-            await msg.edit(content="@everyone", embed=embed, view=view)
-            return
-        except:
-            vzp_data["message_id"] = None
-    
-    msg = await channel.send(content="@everyone", embed=embed, view=view)
-    vzp_data["message_id"] = msg.id
+        await asyncio.sleep(600)
 
 # --- СОБЫТИЕ on_ready ---
 @client.event
@@ -907,15 +959,16 @@ async def on_ready():
     if CAR_CHANNEL_ID:
         await update_cars_channel()
     
-    if VZP_CHANNEL_ID:
-        vzp_data["members"] = {}
-        vzp_data["message_id"] = None
-        vzp_data["is_completed"] = False
-        vzp_data["target_count"] = 0
-        vzp_data["last_reminder_time"] = None
-        await update_vzp_message()
+    # Инициализация VZP
+    vzp_data["attack_members"] = {}
+    vzp_data["defense_members"] = {}
+    vzp_data["attack_message_id"] = None
+    vzp_data["defense_message_id"] = None
+    vzp_data["is_completed"] = False
+    vzp_data["attack_completed"] = False
+    vzp_data["defense_completed"] = False
+    vzp_data["last_reminder_time"] = None
     
-    # Запускаем цикл напоминаний
     client.loop.create_task(reminder_loop())
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
@@ -1016,17 +1069,17 @@ async def contr_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"❌ Ошибка при ответе пользователю: {e}")
 
-# --- КОМАНДА: /vzp ---
+# --- КОМАНДА: /vzp_atk ---
 @tree.command(
-    name="vzp", 
-    description="Создать сбор на ВСку",
+    name="vzp_atk", 
+    description="Создать сбор на атаку",
     guild=discord.Object(id=GUILD_ID)
 )
-@app_commands.describe(count="Количество человек для сбора (например: 5, 10, 20)")
-async def vzp_command(interaction: discord.Interaction, count: app_commands.Range[int, 2, 50]):
-    """Создает сбор на ВСку в канале VZP."""
+@app_commands.describe(count="Количество человек для атаки (например: 6)")
+async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50]):
+    """Создает сбор на атаку в канале VZP."""
     
-    print(f"🔵 Команда /vzp вызвана пользователем {interaction.user.display_name}")
+    print(f"🔵 Команда /vzp_atk вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     print(f"🔵 Нужно человек: {count}")
     
@@ -1037,17 +1090,62 @@ async def vzp_command(interaction: discord.Interaction, count: app_commands.Rang
         )
         return
     
-    # Сбрасываем состояние
-    vzp_data["members"] = {}
-    vzp_data["message_id"] = None
-    vzp_data["target_count"] = count
-    vzp_data["is_completed"] = False
-    vzp_data["last_reminder_time"] = None
+    if vzp_data["is_completed"]:
+        await interaction.response.send_message(
+            "❌ Сбор уже завершен! Используйте команду заново.",
+            ephemeral=True
+        )
+        return
     
-    await update_vzp_message()
+    vzp_data["attack_target"] = count
+    vzp_data["attack_members"] = {}
+    vzp_data["attack_message_id"] = None
+    vzp_data["attack_completed"] = False
+    
+    await update_vzp_messages()
     
     await interaction.response.send_message(
-        f"✅ Сбор на ВСку создан! Нужно **{count}** человек.",
+        f"✅ Сбор на атаку создан! Нужно **{count}** человек.",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /vzp_def ---
+@tree.command(
+    name="vzp_def", 
+    description="Создать сбор на защиту",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(count="Количество человек для защиты (например: 6)")
+async def vzp_def_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50]):
+    """Создает сбор на защиту в канале VZP."""
+    
+    print(f"🔵 Команда /vzp_def вызвана пользователем {interaction.user.display_name}")
+    print(f"🔵 Канал: {interaction.channel_id}")
+    print(f"🔵 Нужно человек: {count}")
+    
+    if interaction.channel_id != VZP_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"❌ Эта команда доступна только в канале <#{VZP_CHANNEL_ID}>!",
+            ephemeral=True
+        )
+        return
+    
+    if vzp_data["is_completed"]:
+        await interaction.response.send_message(
+            "❌ Сбор уже завершен! Используйте команду заново.",
+            ephemeral=True
+        )
+        return
+    
+    vzp_data["defense_target"] = count
+    vzp_data["defense_members"] = {}
+    vzp_data["defense_message_id"] = None
+    vzp_data["defense_completed"] = False
+    
+    await update_vzp_messages()
+    
+    await interaction.response.send_message(
+        f"✅ Сбор на защиту создан! Нужно **{count}** человек.",
         ephemeral=True
     )
 
