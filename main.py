@@ -5,19 +5,18 @@ from discord.ui import Button, View, Modal, TextInput
 import datetime
 import asyncio
 
-# --- ID из переменных окружения ---
-GUILD_ID = int(os.getenv('GUILD_ID', 0))
-CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
-CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
-LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+# --- ID каналов (хардкод) ---
+CONTRACT_CHANNEL_ID = 1514230445825593424  # Канал для контрактов
+CAR_CHANNEL_ID = 1525982684281704599  # ВСТАВЬТЕ ID КАНАЛА ДЛЯ МАШИН!
+LOG_CHANNEL_ID = 1525982684281704599   # ВСТАВЬТЕ ID КАНАЛА ДЛЯ ЛОГОВ (опционально)
+GUILD_ID = 1502042250866069554         # ВСТАВЬТЕ ID ВАШЕГО СЕРВЕРА!
 
-# Проверяем, что все ID заданы
-if GUILD_ID == 0:
-    print("❌ ОШИБКА: GUILD_ID не задан в переменных окружения!")
-if CONTRACT_CHANNEL_ID == 0:
-    print("❌ ОШИБКА: CONTRACT_CHANNEL_ID не задан в переменных окружения!")
-if CAR_CHANNEL_ID == 0:
-    print("❌ ОШИБКА: CAR_CHANNEL_ID не задан в переменных окружения!")
+print(f"""
+📋 ПРОВЕРКА ID:
+CONTRACT_CHANNEL_ID: {CONTRACT_CHANNEL_ID}
+CAR_CHANNEL_ID: {CAR_CHANNEL_ID}
+GUILD_ID: {GUILD_ID}
+""")
 
 # --- Данные о машинах (7 штук) ---
 cars = {
@@ -59,7 +58,6 @@ async def cleanup_channel(channel_id: int, keep_last: int = 10, exclude_ids: lis
     
     channel = client.get_channel(channel_id)
     if channel is None:
-        print(f"❌ Канал с ID {channel_id} не найден!")
         return
     
     try:
@@ -67,13 +65,9 @@ async def cleanup_channel(channel_id: int, keep_last: int = 10, exclude_ids: lis
         async for msg in channel.history(limit=50):
             messages.append(msg)
         
-        messages_to_keep = []
         messages_to_delete = []
-        
         for msg in messages:
-            if msg.id in exclude_ids or msg.pinned:
-                messages_to_keep.append(msg)
-            else:
+            if msg.id not in exclude_ids and not msg.pinned:
                 messages_to_delete.append(msg)
         
         if len(messages_to_delete) > keep_last:
@@ -81,22 +75,20 @@ async def cleanup_channel(channel_id: int, keep_last: int = 10, exclude_ids: lis
             to_remove = messages_to_delete[:-keep_last]
             
             if to_remove:
-                print(f"🗑️ Удаляю {len(to_remove)} старых сообщений в канале {channel.name}")
+                print(f"🗑️ Удаляю {len(to_remove)} старых сообщений")
                 for msg in to_remove:
                     try:
                         await msg.delete()
                         await asyncio.sleep(0.3)
-                    except Exception as e:
-                        print(f"❌ Ошибка при удалении сообщения {msg.id}: {e}")
-    
-    except Exception as e:
-        print(f"❌ Ошибка при очистке канала {channel.name}: {e}")
+                    except:
+                        pass
+    except:
+        pass
 
 # --- Функция для отправки сообщения с очисткой ---
 async def send_message_with_cleanup(channel_id: int, content: str = None, embed: discord.Embed = None, view: View = None, keep_last: int = 10):
     channel = client.get_channel(channel_id)
     if channel is None:
-        print(f"❌ Канал с ID {channel_id} не найден!")
         return None
     
     if embed and view:
@@ -139,12 +131,10 @@ def generate_car_list():
 async def free_car_auto(car_name: str):
     if car_name not in cars:
         return
-    
     if cars[car_name]["status"] == "Свободна":
         return
     
     user_name = cars[car_name]["user"]
-    
     cars[car_name]["status"] = "Свободна"
     cars[car_name]["user"] = None
     cars[car_name]["end_time"] = None
@@ -155,7 +145,6 @@ async def free_car_auto(car_name: str):
         color=discord.Color.orange()
     )
     embed.add_field(name="Кто взял", value=user_name, inline=True)
-    embed.add_field(name="Причина", value="Время истекло", inline=True)
     embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
     
     await send_log(f"⏰ **{user_name}** время вышло, машина **{car_name}** освобождена", embed=embed)
@@ -185,10 +174,9 @@ async def update_cars_channel():
         keep_last=10
     )
 
-# --- Автоматический таймер для освобождения машины ---
+# --- Автоматический таймер ---
 async def auto_free_timer(car_name: str, minutes: int):
     await asyncio.sleep(minutes * 60)
-    
     if car_name in cars and cars[car_name]["status"] == "Занята":
         await free_car_auto(car_name)
 
@@ -239,18 +227,6 @@ class TimeButtonsView(View):
         
         asyncio.create_task(auto_free_timer(self.car_name, minutes))
         
-        embed = discord.Embed(
-            title="🚗 Машина взята",
-            description=f"**{self.car_name}**",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Кто взял", value=user_name, inline=True)
-        embed.add_field(name="Время", value=f"{minutes} минут", inline=True)
-        embed.add_field(name="До", value=end_time.strftime("%H:%M"), inline=True)
-        embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
-        
-        await send_log(f"✅ **{user_name}** взял машину **{self.car_name}**", embed=embed)
-        
         await interaction.response.send_message(
             f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
             ephemeral=False
@@ -258,7 +234,7 @@ class TimeButtonsView(View):
         
         await update_cars_channel()
 
-# --- Модальное окно для выбора навыков ---
+# --- Модальное окно для навыков ---
 class SkillModal(Modal):
     def __init__(self, contract_id: str):
         super().__init__(title="Выберите навыки")
@@ -293,14 +269,14 @@ class SkillModal(Modal):
         
         if self.contract_id not in contracts:
             await interaction.response.send_message(
-                "❌ Контракт уже завершен или не существует!",
+                "❌ Контракт уже завершен!",
                 ephemeral=True
             )
             return
         
         if user_id in contracts[self.contract_id]["members"]:
             await interaction.response.send_message(
-                "❌ Вы уже записаны на этот контракт!",
+                "❌ Вы уже записаны!",
                 ephemeral=True
             )
             return
@@ -313,14 +289,14 @@ class SkillModal(Modal):
         }
         
         await interaction.response.send_message(
-            f"✅ Вы записались на контракт! Ваши навыки сохранены.",
+            f"✅ Вы записались на контракт!",
             ephemeral=True
         )
         
         if len(contracts[self.contract_id]["members"]) >= 3:
             await finish_contract(self.contract_id)
 
-# --- Кнопка для вступления в контракт ---
+# --- Кнопка вступления ---
 class ContractJoinButton(Button):
     def __init__(self, contract_id: str):
         super().__init__(
@@ -333,14 +309,14 @@ class ContractJoinButton(Button):
     async def callback(self, interaction: discord.Interaction):
         if self.contract_id not in contracts:
             await interaction.response.send_message(
-                "❌ Контракт уже завершен или не существует!",
+                "❌ Контракт уже завершен!",
                 ephemeral=True
             )
             return
         
         if str(interaction.user.id) in contracts[self.contract_id]["members"]:
             await interaction.response.send_message(
-                "❌ Вы уже записаны на этот контракт!",
+                "❌ Вы уже записаны!",
                 ephemeral=True
             )
             return
@@ -401,7 +377,7 @@ async def finish_contract(contract_id: str):
     
     del contracts[contract_id]
 
-# --- Таймер для контракта ---
+# --- Таймер контракта ---
 async def contract_timer(contract_id: str):
     await asyncio.sleep(300)
     
@@ -415,18 +391,16 @@ async def contract_timer(contract_id: str):
     else:
         await send_message_with_cleanup(
             CONTRACT_CHANNEL_ID,
-            content=f"❌ Контракт **{contract_data['name']}** отменен: никто не записался за 5 минут.",
+            content=f"❌ Контракт **{contract_data['name']}** отменен: никто не записался.",
             keep_last=10
         )
         del contracts[contract_id]
 
-# --- Кнопки для взятия машин ---
+# --- Кнопки машин ---
 class CarButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        
         car_list = list(cars.keys())
-        
         for i, car_name in enumerate(car_list[:7]):
             label = car_name[:25] + "..." if len(car_name) > 25 else car_name
             button = Button(label=label, style=discord.ButtonStyle.success, custom_id=f"car_{i}")
@@ -441,12 +415,9 @@ class CarButtonsView(View):
                     ephemeral=True
                 )
                 return
-            
-            view = TimeButtonsView(car_name)
-            
             await interaction.response.send_message(
                 f"🚗 **{car_name}**\nВыберите время:",
-                view=view,
+                view=TimeButtonsView(car_name),
                 ephemeral=True
             )
         return callback
@@ -455,9 +426,7 @@ class CarButtonsView(View):
 class FreeButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        
         car_list = list(cars.keys())
-        
         for i, car_name in enumerate(car_list[:7]):
             label = car_name[:25] + "..." if len(car_name) > 25 else car_name
             button = Button(label=f"🗑️ {label}", style=discord.ButtonStyle.danger, custom_id=f"free_{i}")
@@ -475,7 +444,7 @@ class FreeButtonsView(View):
             
             if cars[car_name]["user"] != interaction.user.display_name:
                 await interaction.response.send_message(
-                    f"❌ Вы не можете освободить эту машину! Ее взял: {cars[car_name]['user']}",
+                    f"❌ Вы не можете освободить эту машину!",
                     ephemeral=True
                 )
                 return
@@ -484,16 +453,6 @@ class FreeButtonsView(View):
             cars[car_name]["status"] = "Свободна"
             cars[car_name]["user"] = None
             cars[car_name]["end_time"] = None
-            
-            embed = discord.Embed(
-                title="🚗 Машина освобождена",
-                description=f"**{car_name}**",
-                color=discord.Color.orange()
-            )
-            embed.add_field(name="Кто освободил", value=user_name, inline=True)
-            embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
-            
-            await send_log(f"✅ **{user_name}** освободил машину **{car_name}**", embed=embed)
             
             await interaction.response.send_message(
                 f"✅ Машина '{car_name}' освобождена!",
@@ -508,62 +467,39 @@ class FreeButtonsView(View):
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     
-    # Проверяем все каналы
-    if CONTRACT_CHANNEL_ID:
-        channel = client.get_channel(CONTRACT_CHANNEL_ID)
-        if channel:
-            print(f'✅ Канал контрактов найден: {channel.name}')
-        else:
-            print(f'❌ КАНАЛ КОНТРАКТОВ (ID: {CONTRACT_CHANNEL_ID}) НЕ НАЙДЕН!')
+    # Проверяем каналы
+    for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин")]:
+        if channel_id:
+            channel = client.get_channel(channel_id)
+            if channel:
+                print(f'✅ Канал {name} найден: {channel.name}')
+            else:
+                print(f'❌ КАНАЛ {name} (ID: {channel_id}) НЕ НАЙДЕН!')
     
-    if CAR_CHANNEL_ID:
-        channel = client.get_channel(CAR_CHANNEL_ID)
-        if channel:
-            print(f'✅ Канал машин найден: {channel.name}')
-        else:
-            print(f'❌ КАНАЛ МАШИН (ID: {CAR_CHANNEL_ID}) НЕ НАЙДЕН!')
-    
-    if LOG_CHANNEL_ID:
-        channel = client.get_channel(LOG_CHANNEL_ID)
-        if channel:
-            print(f'✅ Канал логов найден: {channel.name}')
-        else:
-            print(f'❌ КАНАЛ ЛОГОВ (ID: {LOG_CHANNEL_ID}) НЕ НАЙДЕН!')
-    
-    # Синхронизация команд
+    # Синхронизация
     try:
         guild = discord.Object(id=GUILD_ID)
         await tree.sync(guild=guild)
-        print(f'✅ Команды синхронизированы для сервера {GUILD_ID}')
-        
-        commands = await tree.fetch_commands(guild=guild)
-        print(f'📋 Команды: {[cmd.name for cmd in commands]}')
+        print(f'✅ Команды синхронизированы')
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
     
-    # Очищаем каналы
+    # Очистка и запуск
     if CONTRACT_CHANNEL_ID:
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10)
     if CAR_CHANNEL_ID:
         await cleanup_channel(CAR_CHANNEL_ID, keep_last=10)
-    
-    # Отправляем начальное сообщение с машинами
-    if CAR_CHANNEL_ID:
         await update_cars_channel()
     
-    await send_log(f"✅ Бот **{client.user}** запущен и готов к работе!")
+    await send_log(f"✅ Бот **{client.user}** запущен!")
 
 # --- КОМАНДА: /contract ---
-@tree.command(
-    name="contract", 
-    description="Создать новый контракт",
-    guild=discord.Object(id=GUILD_ID)
-)
+@tree.command(name="contract", description="Создать новый контракт", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(name="Название контракта")
 async def contract_command(interaction: discord.Interaction, name: str):
     if interaction.channel_id != CONTRACT_CHANNEL_ID:
         await interaction.response.send_message(
-            f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+            f"❌ Команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
             ephemeral=True
         )
         return
@@ -587,10 +523,9 @@ async def contract_command(interaction: discord.Interaction, name: str):
         color=discord.Color.blue()
     )
     embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
-    embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
-    embed.add_field(name="Время", value="5 минут на сбор", inline=True)
-    embed.add_field(name="Минимум", value="2 человека для выполнения", inline=True)
-    embed.add_field(name="Требования", value="Навыки: слабые, средние, сильные", inline=False)
+    embed.add_field(name="Статус", value="⏳ Набор (0/3)", inline=True)
+    embed.add_field(name="Время", value="5 минут", inline=True)
+    embed.add_field(name="Минимум", value="2 человека", inline=True)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
     
     await interaction.response.send_message(
@@ -603,267 +538,21 @@ async def contract_command(interaction: discord.Interaction, name: str):
     contracts[contract_id]["timer_task"] = task
 
 # --- КОМАНДА: /cars ---
-@tree.command(
-    name="cars", 
-    description="Обновить список машин",
-    guild=discord.Object(id=GUILD_ID)
-)
+@tree.command(name="cars", description="Обновить список машин", guild=discord.Object(id=GUILD_ID))
 async def cars_command(interaction: discord.Interaction):
     if interaction.channel_id != CAR_CHANNEL_ID:
         await interaction.response.send_message(
-            f"❌ Эта команда доступна только в канале <#{CAR_CHANNEL_ID}>!",
+            f"❌ Команда доступна только в канале <#{CAR_CHANNEL_ID}>!",
             ephemeral=True
         )
         return
     
-    await interaction.response.send_message("🔄 Обновляю список машин...", ephemeral=True)
+    await interaction.response.send_message("🔄 Обновляю...", ephemeral=True)
     await update_cars_channel()
 
-# --- КОМАНДА: /add_car ---
-@tree.command(
-    name="add_car", 
-    description="Добавить новую машину",
-    guild=discord.Object(id=GUILD_ID)
-)
-async def add_car_command(interaction: discord.Interaction):
-    class AddCarModal(Modal):
-        def __init__(self):
-            super().__init__(title="Добавить машину")
-            
-            self.car_name_input = TextInput(
-                label="Название машины",
-                placeholder="Введите название новой машины",
-                min_length=1,
-                max_length=100,
-                required=True
-            )
-            self.add_item(self.car_name_input)
-        
-        async def on_submit(self, interaction: discord.Interaction):
-            car_name = self.car_name_input.value
-            
-            if car_name in cars:
-                await interaction.response.send_message(
-                    f"❌ Машина '{car_name}' уже существует!",
-                    ephemeral=True
-                )
-                return
-            
-            cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
-            
-            await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
-            
-            await interaction.response.send_message(
-                f"✅ Машина '{car_name}' успешно добавлена!",
-                ephemeral=False
-            )
-            
-            await update_cars_channel()
-    
-    await interaction.response.send_modal(AddCarModal())
-
-# --- КОМАНДА: /remove_car ---
-@tree.command(
-    name="remove_car", 
-    description="Удалить машину",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(car_name="Название машины для удаления")
-async def remove_car_command(interaction: discord.Interaction, car_name: str):
-    if car_name not in cars:
-        await interaction.response.send_message(
-            f"❌ Машина '{car_name}' не найдена!",
-            ephemeral=True
-        )
-        return
-    
-    if cars[car_name]["status"] == "Занята":
-        await interaction.response.send_message(
-            f"❌ Нельзя удалить машину '{car_name}' — она занята!",
-            ephemeral=True
-        )
-        return
-    
-    del cars[car_name]
-    
-    await send_log(f"❌ **{interaction.user.display_name}** удалил машину: **{car_name}**")
-    
-    await interaction.response.send_message(
-        f"✅ Машина '{car_name}' успешно удалена!",
-        ephemeral=False
-    )
-    
-    await update_cars_channel()
-
-# --- КОМАНДА: /rename_car ---
-@tree.command(
-    name="rename_car", 
-    description="Переименовать машину",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(car_name="Название машины для переименования")
-async def rename_car_command(interaction: discord.Interaction, car_name: str):
-    if car_name not in cars:
-        await interaction.response.send_message(
-            f"❌ Машина '{car_name}' не найдена!",
-            ephemeral=True
-        )
-        return
-    
-    class RenameCarModal(Modal):
-        def __init__(self, old_name: str):
-            super().__init__(title=f"Переименовать: {old_name}")
-            self.old_name = old_name
-            
-            self.new_name_input = TextInput(
-                label="Новое название",
-                placeholder="Введите новое название машины",
-                min_length=1,
-                max_length=100,
-                required=True
-            )
-            self.add_item(self.new_name_input)
-        
-        async def on_submit(self, interaction: discord.Interaction):
-            new_name = self.new_name_input.value
-            
-            if new_name in cars:
-                await interaction.response.send_message(
-                    f"❌ Машина '{new_name}' уже существует!",
-                    ephemeral=True
-                )
-                return
-            
-            car_data = cars.pop(self.old_name)
-            cars[new_name] = car_data
-            
-            await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
-            
-            await interaction.response.send_message(
-                f"✅ Машина '{self.old_name}' переименована в '{new_name}'!",
-                ephemeral=False
-            )
-            
-            await update_cars_channel()
-    
-    await interaction.response.send_modal(RenameCarModal(car_name))
-
-# --- КОМАНДА: /list_cars ---
-@tree.command(
-    name="list_cars", 
-    description="Показать список машин без кнопок",
-    guild=discord.Object(id=GUILD_ID)
-)
-async def list_cars_command(interaction: discord.Interaction):
-    car_list = generate_car_list()
-    await interaction.response.send_message(car_list, ephemeral=True)
-
-# --- КОМАНДА: /take ---
-@tree.command(
-    name="take", 
-    description="Взять машину",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(
-    car_name="Название машины",
-    minutes="Время в минутах (от 1 до 120)"
-)
-async def take_command(
-    interaction: discord.Interaction, 
-    car_name: str, 
-    minutes: app_commands.Range[int, 1, 120]
-):
-    if car_name not in cars:
-        await interaction.response.send_message(
-            f"❌ Машина '{car_name}' не найдена.",
-            ephemeral=True
-        )
-        return
-
-    if cars[car_name]["status"] == "Занята":
-        await interaction.response.send_message(
-            f"❌ Машина '{car_name}' уже занята.",
-            ephemeral=True
-        )
-        return
-
-    user_name = interaction.user.display_name
-    end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
-
-    cars[car_name]["status"] = "Занята"
-    cars[car_name]["user"] = user_name
-    cars[car_name]["end_time"] = end_time
-
-    asyncio.create_task(auto_free_timer(car_name, minutes))
-
-    embed = discord.Embed(
-        title="🚗 Машина взята",
-        description=f"**{car_name}**",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Кто взял", value=user_name, inline=True)
-    embed.add_field(name="Время", value=f"{minutes} минут", inline=True)
-    embed.add_field(name="До", value=end_time.strftime("%H:%M"), inline=True)
-    embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
-    
-    await send_log(f"✅ **{user_name}** взял машину **{car_name}**", embed=embed)
-
-    await interaction.response.send_message(
-        f"✅ Машина '{car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
-        ephemeral=False
-    )
-    
-    await update_cars_channel()
-
-# --- КОМАНДА: /free ---
-@tree.command(
-    name="free", 
-    description="Освободить машину",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(car_name="Название машины")
-async def free_command(interaction: discord.Interaction, car_name: str):
-    if car_name not in cars:
-        await interaction.response.send_message(
-            f"❌ Машина '{car_name}' не найдена.",
-            ephemeral=True
-        )
-        return
-
-    if cars[car_name]["status"] == "Свободна":
-        await interaction.response.send_message(
-            f"✅ Машина '{car_name}' уже свободна.",
-            ephemeral=True
-        )
-        return
-
-    if cars[car_name]["user"] != interaction.user.display_name:
-        await interaction.response.send_message(
-            f"❌ Вы не можете освободить эту машину! Ее взял: {cars[car_name]['user']}",
-            ephemeral=True
-        )
-        return
-
-    user_name = cars[car_name]["user"]
-    cars[car_name]["status"] = "Свободна"
-    cars[car_name]["user"] = None
-    cars[car_name]["end_time"] = None
-
-    embed = discord.Embed(
-        title="🚗 Машина освобождена",
-        description=f"**{car_name}**",
-        color=discord.Color.orange()
-    )
-    embed.add_field(name="Кто освободил", value=user_name, inline=True)
-    embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
-    
-    await send_log(f"✅ **{user_name}** освободил машину **{car_name}**", embed=embed)
-
-    await interaction.response.send_message(
-        f"✅ Машина '{car_name}' освобождена!",
-        ephemeral=False
-    )
-    
-    await update_cars_channel()
-
-# --- ЗАПУСК БОТА
+# --- ЗАПУСК БОТА ---
+token = os.getenv('DISCORD_TOKEN')
+if token:
+    client.run(token)
+else:
+    print("❌ ОШИБКА: DISCORD_TOKEN не найден в переменных окружения!")
