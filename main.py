@@ -16,16 +16,20 @@ cars = {
     "Karin Thunder 2021 SY108SFL": {"status": "Свободна", "user": None, "end_time": None},
 }
 
-# --- ID канала для логов (из переменной окружения) ---
-LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+# --- Данные для контрактов ---
+contracts = {}
+CONTRACT_CHANNEL_ID = 1514230445825593424  # ID канала для контрактов
 
 # --- Настройка бота ---
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 # --- Функция для отправки сообщения в лог-канал ---
+LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+
 async def send_log(message: str, embed: discord.Embed = None):
     if LOG_CHANNEL_ID == 0:
         return
@@ -36,34 +40,6 @@ async def send_log(message: str, embed: discord.Embed = None):
         await channel.send(message, embed=embed)
     else:
         await channel.send(message)
-
-# --- Функция для освобождения машины ---
-async def free_car_auto(car_name: str):
-    """Автоматически освобождает машину и отправляет уведомление."""
-    if car_name not in cars:
-        return
-    
-    if cars[car_name]["status"] == "Свободна":
-        return
-    
-    user_name = cars[car_name]["user"]
-    
-    # Освобождаем машину
-    cars[car_name]["status"] = "Свободна"
-    cars[car_name]["user"] = None
-    cars[car_name]["end_time"] = None
-    
-    # Отправляем уведомление в лог-канал
-    embed = discord.Embed(
-        title="⏰ Машина автоматически освобождена",
-        description=f"**{car_name}**",
-        color=discord.Color.orange()
-    )
-    embed.add_field(name="Кто взял", value=user_name, inline=True)
-    embed.add_field(name="Причина", value="Время истекло", inline=True)
-    embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
-    
-    await send_log(f"⏰ **{user_name}** время вышло, машина **{car_name}** освобождена", embed=embed)
 
 # --- Функция для создания списка машин ---
 def generate_car_list():
@@ -89,7 +65,131 @@ def generate_car_list():
     
     return "\n".join(lines)
 
-# --- Кнопки быстрого выбора времени ---
+# --- Функция для освобождения машины ---
+async def free_car_auto(car_name: str):
+    if car_name not in cars:
+        return
+    
+    if cars[car_name]["status"] == "Свободна":
+        return
+    
+    user_name = cars[car_name]["user"]
+    
+    cars[car_name]["status"] = "Свободна"
+    cars[car_name]["user"] = None
+    cars[car_name]["end_time"] = None
+    
+    embed = discord.Embed(
+        title="⏰ Машина автоматически освобождена",
+        description=f"**{car_name}**",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="Кто взял", value=user_name, inline=True)
+    embed.add_field(name="Причина", value="Время истекло", inline=True)
+    embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
+    
+    await send_log(f"⏰ **{user_name}** время вышло, машина **{car_name}** освобождена", embed=embed)
+
+# --- Автоматический таймер для освобождения машины ---
+async def auto_free_timer(car_name: str, minutes: int):
+    await asyncio.sleep(minutes * 60)
+    
+    if car_name in cars and cars[car_name]["status"] == "Занята":
+        await free_car_auto(car_name)
+
+# --- Модальное окно для выбора навыков ---
+class SkillModal(Modal):
+    def __init__(self, contract_id: str):
+        super().__init__(title="Выберите навыки")
+        self.contract_id = contract_id
+        
+        self.skill_weak = TextInput(
+            label="Слабые навыки",
+            placeholder="Например: стрельба, вождение",
+            required=False,
+            max_length=100
+        )
+        self.add_item(self.skill_weak)
+        
+        self.skill_medium = TextInput(
+            label="Средние навыки",
+            placeholder="Например: тактика, планирование",
+            required=False,
+            max_length=100
+        )
+        self.add_item(self.skill_medium)
+        
+        self.skill_strong = TextInput(
+            label="Сильные навыки",
+            placeholder="Например: лидерство, снайпинг",
+            required=False,
+            max_length=100
+        )
+        self.add_item(self.skill_strong)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        
+        if self.contract_id not in contracts:
+            await interaction.response.send_message(
+                "❌ Контракт уже завершен или не существует!",
+                ephemeral=True
+            )
+            return
+        
+        if user_id in contracts[self.contract_id]["members"]:
+            await interaction.response.send_message(
+                "❌ Вы уже записаны на этот контракт!",
+                ephemeral=True
+            )
+            return
+        
+        # Добавляем участника
+        contracts[self.contract_id]["members"][user_id] = {
+            "name": interaction.user.display_name,
+            "weak": self.skill_weak.value or "Не указаны",
+            "medium": self.skill_medium.value or "Не указаны",
+            "strong": self.skill_strong.value or "Не указаны"
+        }
+        
+        await interaction.response.send_message(
+            f"✅ Вы записались на контракт! Ваши навыки сохранены.",
+            ephemeral=True
+        )
+        
+        # Проверяем, набралось ли 3 человека
+        if len(contracts[self.contract_id]["members"]) >= 3:
+            await finish_contract(self.contract_id)
+
+# --- Кнопка для вступления в контракт ---
+class ContractJoinButton(Button):
+    def __init__(self, contract_id: str):
+        super().__init__(
+            label="Вступить на выполнение контракта",
+            style=discord.ButtonStyle.success,
+            custom_id=f"contract_join_{contract_id}"
+        )
+        self.contract_id = contract_id
+    
+    async def callback(self, interaction: discord.Interaction):
+        if self.contract_id not in contracts:
+            await interaction.response.send_message(
+                "❌ Контракт уже завершен или не существует!",
+                ephemeral=True
+            )
+            return
+        
+        if str(interaction.user.id) in contracts[self.contract_id]["members"]:
+            await interaction.response.send_message(
+                "❌ Вы уже записаны на этот контракт!",
+                ephemeral=True
+            )
+            return
+        
+        # Открываем окно с навыками
+        await interaction.response.send_modal(SkillModal(self.contract_id))
+
+# --- Класс для кнопок времени ---
 class TimeButtonsView(View):
     def __init__(self, car_name: str):
         super().__init__(timeout=60)
@@ -134,7 +234,6 @@ class TimeButtonsView(View):
         cars[self.car_name]["user"] = user_name
         cars[self.car_name]["end_time"] = end_time
         
-        # Запускаем таймер для автоматического освобождения
         asyncio.create_task(auto_free_timer(self.car_name, minutes))
         
         embed = discord.Embed(
@@ -154,149 +253,80 @@ class TimeButtonsView(View):
             ephemeral=False
         )
 
-# --- Модальное окно для ручного ввода времени ---
-class TimeModal(Modal):
-    def __init__(self, car_name: str):
-        super().__init__(title=f"Взять машину: {car_name}")
-        self.car_name = car_name
-        
-        self.time_input = TextInput(
-            label="Время в минутах (1-120)",
-            placeholder="Например: 30",
-            min_length=1,
-            max_length=3,
-            required=True
-        )
-        self.add_item(self.time_input)
+# --- Функция завершения контракта ---
+async def finish_contract(contract_id: str):
+    if contract_id not in contracts:
+        return
     
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            minutes = int(self.time_input.value)
-            if minutes < 1 or minutes > 120:
-                await interaction.response.send_message(
-                    "❌ Время должно быть от 1 до 120 минут!",
-                    ephemeral=True
-                )
-                return
-            
-            if cars[self.car_name]["status"] == "Занята":
-                await interaction.response.send_message(
-                    f"❌ Машина '{self.car_name}' уже занята!",
-                    ephemeral=True
-                )
-                return
-            
-            user_name = interaction.user.display_name
-            end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
-            
-            cars[self.car_name]["status"] = "Занята"
-            cars[self.car_name]["user"] = user_name
-            cars[self.car_name]["end_time"] = end_time
-            
-            # Запускаем таймер для автоматического освобождения
-            asyncio.create_task(auto_free_timer(self.car_name, minutes))
-            
-            embed = discord.Embed(
-                title="🚗 Машина взята",
-                description=f"**{self.car_name}**",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="Кто взял", value=user_name, inline=True)
-            embed.add_field(name="Время", value=f"{minutes} минут", inline=True)
-            embed.add_field(name="До", value=end_time.strftime("%H:%M"), inline=True)
-            embed.set_footer(text=datetime.datetime.now().strftime("%d.%m.%Y %H:%M"))
-            
-            await send_log(f"✅ **{user_name}** взял машину **{self.car_name}**", embed=embed)
-            
-            await interaction.response.send_message(
-                f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
-                ephemeral=False
-            )
-            
-        except ValueError:
-            await interaction.response.send_message(
-                "❌ Введите число!",
-                ephemeral=True
-            )
-
-# --- Автоматический таймер для освобождения машины ---
-async def auto_free_timer(car_name: str, minutes: int):
-    """Ждет указанное время и освобождает машину."""
-    await asyncio.sleep(minutes * 60)  # Переводим минуты в секунды
+    contract_data = contracts[contract_id]
+    members = contract_data["members"]
     
-    # Проверяем, не освободили ли машину раньше
-    if car_name in cars and cars[car_name]["status"] == "Занята":
-        await free_car_auto(car_name)
-
-# --- Модальное окно для добавления машины ---
-class AddCarModal(Modal):
-    def __init__(self):
-        super().__init__(title="Добавить машину")
-        
-        self.car_name_input = TextInput(
-            label="Название машины",
-            placeholder="Введите название новой машины",
-            min_length=1,
-            max_length=100,
-            required=True
-        )
-        self.add_item(self.car_name_input)
+    # Отменяем таймер
+    if "timer_task" in contract_data:
+        contract_data["timer_task"].cancel()
     
-    async def on_submit(self, interaction: discord.Interaction):
-        car_name = self.car_name_input.value
-        
-        if car_name in cars:
-            await interaction.response.send_message(
-                f"❌ Машина '{car_name}' уже существует!",
-                ephemeral=True
+    # Проверяем минимальное количество участников (нужно минимум 2)
+    if len(members) < 2:
+        channel = client.get_channel(CONTRACT_CHANNEL_ID)
+        if channel:
+            await channel.send(
+                f"❌ **{contract_data['name']}**\n"
+                f"Извините, нужно минимум двое на контракт.\n"
+                f"Записалось: {len(members)} человек."
             )
-            return
-        
-        cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
-        
-        await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
-        
-        await interaction.response.send_message(
-            f"✅ Машина '{car_name}' успешно добавлена!",
-            ephemeral=False
-        )
-
-# --- Модальное окно для переименования машины ---
-class RenameCarModal(Modal):
-    def __init__(self, old_name: str):
-        super().__init__(title=f"Переименовать: {old_name}")
-        self.old_name = old_name
-        
-        self.new_name_input = TextInput(
-            label="Новое название",
-            placeholder="Введите новое название машины",
-            min_length=1,
-            max_length=100,
-            required=True
-        )
-        self.add_item(self.new_name_input)
+        del contracts[contract_id]
+        return
     
-    async def on_submit(self, interaction: discord.Interaction):
-        new_name = self.new_name_input.value
-        
-        if new_name in cars:
-            await interaction.response.send_message(
-                f"❌ Машина '{new_name}' уже существует!",
-                ephemeral=True
-            )
-            return
-        
-        car_data = cars.pop(self.old_name)
-        cars[new_name] = car_data
-        
-        await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
-        
-        await interaction.response.send_message(
-            f"✅ Машина '{self.old_name}' переименована в '{new_name}'!",
-            ephemeral=False
+    # Формируем список участников
+    embed = discord.Embed(
+        title="✅ Контракт сформирован!",
+        description=f"**{contract_data['name']}**",
+        color=discord.Color.green()
+    )
+    
+    member_list = []
+    for user_id, data in members.items():
+        member_list.append(
+            f"**{data['name']}**\n"
+            f"  🔹 Слабые: {data['weak']}\n"
+            f"  🔸 Средние: {data['medium']}\n"
+            f"  🔺 Сильные: {data['strong']}"
         )
+    
+    embed.add_field(
+        name=f"👥 Участники ({len(members)} человек)",
+        value="\n\n".join(member_list),
+        inline=False
+    )
+    
+    # Отправляем в канал контракта
+    channel = client.get_channel(CONTRACT_CHANNEL_ID)
+    if channel:
+        await channel.send(f"@Контракт", embed=embed)
+    
+    # Удаляем контракт из памяти
+    del contracts[contract_id]
 
-# --- Кнопки для взятия машин (7 штук) ---
+# --- Таймер для контракта ---
+async def contract_timer(contract_id: str):
+    await asyncio.sleep(300)  # 5 минут
+    
+    if contract_id not in contracts:
+        return
+    
+    contract_data = contracts[contract_id]
+    
+    # Если есть хотя бы 1 участник, формируем контракт
+    if len(contract_data["members"]) > 0:
+        await finish_contract(contract_id)
+    else:
+        # Если никого нет, удаляем контракт
+        channel = client.get_channel(CONTRACT_CHANNEL_ID)
+        if channel:
+            await channel.send(f"❌ Контракт **{contract_data['name']}** отменен: никто не записался за 5 минут.")
+        del contracts[contract_id]
+
+# --- Кнопки для взятия машин ---
 class CarButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -318,26 +348,16 @@ class CarButtonsView(View):
                 )
                 return
             
-            # Создаем View с кнопками времени
             view = TimeButtonsView(car_name)
             
-            # Добавляем кнопку для ручного ввода
-            manual_button = Button(label="✏️ Своё время", style=discord.ButtonStyle.secondary)
-            
-            async def manual_callback(interaction: discord.Interaction):
-                await interaction.response.send_modal(TimeModal(car_name))
-            
-            manual_button.callback = manual_callback
-            view.add_item(manual_button)
-            
             await interaction.response.send_message(
-                f"🚗 **{car_name}**\nВыберите время или введите своё:",
+                f"🚗 **{car_name}**\nВыберите время:",
                 view=view,
                 ephemeral=True
             )
         return callback
 
-# --- Кнопки освобождения (7 штук) ---
+# --- Кнопки освобождения ---
 class FreeButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -394,6 +414,59 @@ async def on_ready():
     await tree.sync()
     await send_log(f"✅ Бот **{client.user}** запущен и готов к работе!")
 
+# --- КОМАНДА: /contract ---
+@tree.command(name="contract", description="Создать новый контракт")
+@app_commands.describe(name="Название контракта")
+async def contract_command(interaction: discord.Interaction, name: str):
+    """Создает новый контракт в канале."""
+    
+    # Проверяем, что команда используется в правильном канале
+    if interaction.channel_id != CONTRACT_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+            ephemeral=True
+        )
+        return
+    
+    # Генерируем ID контракта
+    contract_id = f"{interaction.user.id}_{datetime.datetime.now().timestamp()}"
+    
+    # Создаем контракт
+    contracts[contract_id] = {
+        "name": name,
+        "author": interaction.user.display_name,
+        "author_id": str(interaction.user.id),
+        "members": {},
+        "created_at": datetime.datetime.now()
+    }
+    
+    # Создаем View с кнопкой
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
+    
+    # Отправляем сообщение
+    embed = discord.Embed(
+        title="📋 Новый контракт",
+        description=f"**{name}**",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
+    embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
+    embed.add_field(name="Время", value="5 минут на сбор", inline=True)
+    embed.add_field(name="Минимум", value="2 человека для выполнения", inline=True)
+    embed.add_field(name="Требования", value="Навыки: слабые, средние, сильные", inline=False)
+    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
+    
+    await interaction.response.send_message(
+        content="@Контракт",
+        embed=embed,
+        view=view
+    )
+    
+    # Запускаем таймер на 5 минут
+    task = asyncio.create_task(contract_timer(contract_id))
+    contracts[contract_id]["timer_task"] = task
+
 # --- КОМАНДА: /cars ---
 @tree.command(name="cars", description="Показать список машин с кнопками")
 async def cars_command(interaction: discord.Interaction):
@@ -417,6 +490,39 @@ async def cars_command(interaction: discord.Interaction):
 # --- КОМАНДА: /add_car ---
 @tree.command(name="add_car", description="Добавить новую машину в список")
 async def add_car_command(interaction: discord.Interaction):
+    # Создаем модальное окно для добавления машины
+    class AddCarModal(Modal):
+        def __init__(self):
+            super().__init__(title="Добавить машину")
+            
+            self.car_name_input = TextInput(
+                label="Название машины",
+                placeholder="Введите название новой машины",
+                min_length=1,
+                max_length=100,
+                required=True
+            )
+            self.add_item(self.car_name_input)
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            car_name = self.car_name_input.value
+            
+            if car_name in cars:
+                await interaction.response.send_message(
+                    f"❌ Машина '{car_name}' уже существует!",
+                    ephemeral=True
+                )
+                return
+            
+            cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
+            
+            await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
+            
+            await interaction.response.send_message(
+                f"✅ Машина '{car_name}' успешно добавлена!",
+                ephemeral=False
+            )
+    
     await interaction.response.send_modal(AddCarModal())
 
 # --- КОМАНДА: /remove_car ---
@@ -456,6 +562,40 @@ async def rename_car_command(interaction: discord.Interaction, car_name: str):
             ephemeral=True
         )
         return
+    
+    class RenameCarModal(Modal):
+        def __init__(self, old_name: str):
+            super().__init__(title=f"Переименовать: {old_name}")
+            self.old_name = old_name
+            
+            self.new_name_input = TextInput(
+                label="Новое название",
+                placeholder="Введите новое название машины",
+                min_length=1,
+                max_length=100,
+                required=True
+            )
+            self.add_item(self.new_name_input)
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            new_name = self.new_name_input.value
+            
+            if new_name in cars:
+                await interaction.response.send_message(
+                    f"❌ Машина '{new_name}' уже существует!",
+                    ephemeral=True
+                )
+                return
+            
+            car_data = cars.pop(self.old_name)
+            cars[new_name] = car_data
+            
+            await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
+            
+            await interaction.response.send_message(
+                f"✅ Машина '{self.old_name}' переименована в '{new_name}'!",
+                ephemeral=False
+            )
     
     await interaction.response.send_modal(RenameCarModal(car_name))
 
@@ -497,7 +637,6 @@ async def take_command(
     cars[car_name]["user"] = user_name
     cars[car_name]["end_time"] = end_time
 
-    # Запускаем таймер для автоматического освобождения
     asyncio.create_task(auto_free_timer(car_name, minutes))
 
     embed = discord.Embed(
