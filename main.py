@@ -1015,7 +1015,7 @@ async def reminder_loop():
             print(f"❌ Ошибка в цикле напоминаний: {e}")
         await asyncio.sleep(600)
 
-# --- ОБРАБОТЧИК СООБЩЕНИЙ ДЛЯ /contr И !контракт ---
+# --- ИСПРАВЛЕННЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ---
 @client.event
 async def on_message(message: discord.Message):
     # Игнорируем сообщения от бота
@@ -1028,43 +1028,64 @@ async def on_message(message: discord.Message):
     
     content = message.content.strip()
     
-    # Проверяем команду /contr текст
-    if content.lower().startswith('/contr '):
-        text = content[7:].strip()  # Убираем '/contr ' (7 символов)
+    # Проверяем команду /contr (с пробелом или без)
+    if content.lower().startswith('/contr'):
+        text = content[6:].strip()
         if text:
-            # Создаем фейковое взаимодействие
             class FakeInteraction:
                 def __init__(self, user, channel_id):
                     self.user = user
                     self.channel_id = channel_id
                     self.response = None
-                    self._followup = None
                 
                 async def response(self):
                     return self
                 
                 async def send_message(self, content, ephemeral=False):
-                    # Отправляем ответ в канал
                     await message.channel.send(content)
                 
                 async def followup(self):
                     return self
             
             fake_interaction = FakeInteraction(message.author, message.channel.id)
-            
-            # Вызываем команду
             await contr_command(fake_interaction, text)
             
-            # Удаляем сообщение пользователя, чтобы не спамить
             try:
                 await message.delete()
             except:
                 pass
             return
     
-    # Проверяем команду !контракт текст
-    if content.lower().startswith('!контракт '):
-        text = content[10:].strip()  # Убираем '!контракт ' (10 символов)
+    # Проверяем команду !контракт (с пробелом или без)
+    if content.lower().startswith('!контракт'):
+        text = content[9:].strip()
+        if text:
+            class FakeInteraction:
+                def __init__(self, user, channel_id):
+                    self.user = user
+                    self.channel_id = channel_id
+                
+                async def response(self):
+                    return self
+                
+                async def send_message(self, content, ephemeral=False):
+                    await message.channel.send(content)
+                
+                async def followup(self):
+                    return self
+            
+            fake_interaction = FakeInteraction(message.author, message.channel.id)
+            await contr_command(fake_interaction, text)
+            
+            try:
+                await message.delete()
+            except:
+                pass
+            return
+    
+    # Проверяем команду !контракт (с пробелом или без) - альтернативный вариант
+    if content.lower().startswith('!контракт'):
+        text = content[9:].strip()
         if text:
             class FakeInteraction:
                 def __init__(self, user, channel_id):
