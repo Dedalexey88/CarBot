@@ -11,13 +11,13 @@ CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
 CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 
-# Проверяем, что все ID заданы
-if GUILD_ID == 0:
-    print("❌ ОШИБКА: GUILD_ID не задан в переменных окружения!")
-if CONTRACT_CHANNEL_ID == 0:
-    print("❌ ОШИБКА: CONTRACT_CHANNEL_ID не задан в переменных окружения!")
-if CAR_CHANNEL_ID == 0:
-    print("❌ ОШИБКА: CAR_CHANNEL_ID не задан в переменных окружения!")
+print(f"""
+📋 ПРОВЕРКА ID:
+GUILD_ID: {GUILD_ID}
+CONTRACT_CHANNEL_ID: {CONTRACT_CHANNEL_ID}
+CAR_CHANNEL_ID: {CAR_CHANNEL_ID}
+LOG_CHANNEL_ID: {LOG_CHANNEL_ID}
+""")
 
 # --- Данные о машинах (7 штук) ---
 cars = {
@@ -83,26 +83,8 @@ async def cleanup_channel(channel_id: int, keep_last: int = 10, exclude_ids: lis
                         await asyncio.sleep(0.3)
                     except:
                         pass
-    except:
-        pass
-
-# --- Функция для отправки сообщения с очисткой ---
-async def send_message_with_cleanup(channel_id: int, content: str = None, embed: discord.Embed = None, view: View = None, keep_last: int = 10):
-    channel = client.get_channel(channel_id)
-    if channel is None:
-        return None
-    
-    if embed and view:
-        msg = await channel.send(content, embed=embed, view=view)
-    elif embed:
-        msg = await channel.send(content, embed=embed)
-    elif view:
-        msg = await channel.send(content, view=view)
-    else:
-        msg = await channel.send(content)
-    
-    await cleanup_channel(channel_id, keep_last, exclude_ids=[msg.id])
-    return msg
+    except Exception as e:
+        print(f"⚠️ Ошибка очистки: {e}")
 
 # --- Функция для создания списка машин ---
 def generate_car_list():
@@ -168,12 +150,10 @@ async def update_cars_channel():
     for item in free_view.children:
         view.add_item(item)
     
-    await send_message_with_cleanup(
-        CAR_CHANNEL_ID,
-        content=f"{car_list}\n\n**Кнопки:**\n🟢 Левая колонка - взять машину\n🔴 Правая колонка - освободить машину",
-        view=view,
-        keep_last=10
-    )
+    channel = client.get_channel(CAR_CHANNEL_ID)
+    if channel:
+        msg = await channel.send(f"{car_list}\n\n**Кнопки:**\n🟢 Левая колонка - взять машину\n🔴 Правая колонка - освободить машину", view=view)
+        await cleanup_channel(CAR_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
 
 # --- Автоматический таймер ---
 async def auto_free_timer(car_name: str, minutes: int):
@@ -336,15 +316,13 @@ async def finish_contract(contract_id: str):
         contract_data["timer_task"].cancel()
     
     if len(members) < 2:
-        await send_message_with_cleanup(
-            CONTRACT_CHANNEL_ID,
-            content=(
+        channel = client.get_channel(CONTRACT_CHANNEL_ID)
+        if channel:
+            await channel.send(
                 f"❌ **{contract_data['name']}**\n"
                 f"Извините, нужно минимум двое на контракт.\n"
                 f"Записалось: {len(members)} человек."
-            ),
-            keep_last=10
-        )
+            )
         del contracts[contract_id]
         return
     
@@ -369,12 +347,10 @@ async def finish_contract(contract_id: str):
         inline=False
     )
     
-    await send_message_with_cleanup(
-        CONTRACT_CHANNEL_ID,
-        content="@Контракт",
-        embed=embed,
-        keep_last=10
-    )
+    channel = client.get_channel(CONTRACT_CHANNEL_ID)
+    if channel:
+        msg = await channel.send(content="@Контракт", embed=embed)
+        await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
     
     del contracts[contract_id]
 
@@ -390,11 +366,9 @@ async def contract_timer(contract_id: str):
     if len(contract_data["members"]) > 0:
         await finish_contract(contract_id)
     else:
-        await send_message_with_cleanup(
-            CONTRACT_CHANNEL_ID,
-            content=f"❌ Контракт **{contract_data['name']}** отменен: никто не записался.",
-            keep_last=10
-        )
+        channel = client.get_channel(CONTRACT_CHANNEL_ID)
+        if channel:
+            await channel.send(f"❌ Контракт **{contract_data['name']}** отменен: никто не записался.")
         del contracts[contract_id]
 
 # --- Кнопки машин ---
@@ -483,22 +457,18 @@ async def on_ready():
         await tree.sync(guild=guild)
         print(f'✅ Команды синхронизированы')
         
-        # Выводим список команд
         commands = await tree.fetch_commands(guild=guild)
         print(f'📋 Доступные команды: {[cmd.name for cmd in commands]}')
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
     
     # Очистка и запуск
-    if CONTRACT_CHANNEL_ID:
-        await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10)
     if CAR_CHANNEL_ID:
-        await cleanup_channel(CAR_CHANNEL_ID, keep_last=10)
         await update_cars_channel()
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contr (новая команда вместо /contract) ---
+# --- КОМАНДА: /contr ---
 @tree.command(
     name="contr", 
     description="Создать новый контракт",
@@ -508,52 +478,82 @@ async def on_ready():
 async def contr_command(interaction: discord.Interaction, name: str):
     """Создает новый контракт в канале."""
     
-    # Проверяем канал
-    if interaction.channel_id != CONTRACT_CHANNEL_ID:
-        await interaction.response.send_message(
-            f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+    try:
+        # Сразу отвечаем, что команда получена
+        await interaction.response.defer(thinking=True)
+        print(f"✅ /contr от {interaction.user.display_name}: {name}")
+        
+        # Проверяем канал
+        if interaction.channel_id != CONTRACT_CHANNEL_ID:
+            await interaction.followup.send(
+                f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+                ephemeral=True
+            )
+            return
+        
+        # Создаем контракт
+        contract_id = f"{interaction.user.id}_{datetime.datetime.now().timestamp()}"
+        
+        contracts[contract_id] = {
+            "name": name,
+            "author": interaction.user.display_name,
+            "author_id": str(interaction.user.id),
+            "members": {},
+            "created_at": datetime.datetime.now()
+        }
+        
+        # Создаем кнопку
+        view = View(timeout=None)
+        view.add_item(ContractJoinButton(contract_id))
+        
+        # Создаем Embed
+        embed = discord.Embed(
+            title="📋 Новый контракт",
+            description=f"**{name}**",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
+        embed.add_field(name="Статус", value="⏳ Набор (0/3)", inline=True)
+        embed.add_field(name="Время", value="5 минут", inline=True)
+        embed.add_field(name="Минимум", value="2 человека", inline=True)
+        embed.add_field(name="Требования", value="Навыки: слабые, средние, сильные", inline=False)
+        embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
+        
+        # Отправляем в канал
+        channel = client.get_channel(CONTRACT_CHANNEL_ID)
+        if channel is None:
+            await interaction.followup.send(
+                f"❌ Канал не найден!",
+                ephemeral=True
+            )
+            return
+        
+        msg = await channel.send(content="@Контракт", embed=embed, view=view)
+        
+        # Очищаем старые сообщения
+        await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
+        
+        # Запускаем таймер
+        task = asyncio.create_task(contract_timer(contract_id))
+        contracts[contract_id]["timer_task"] = task
+        
+        # Отвечаем пользователю
+        await interaction.followup.send(
+            f"✅ Контракт **{name}** успешно создан!",
             ephemeral=True
         )
-        return
-    
-    # Генерируем ID контракта
-    contract_id = f"{interaction.user.id}_{datetime.datetime.now().timestamp()}"
-    
-    # Создаем контракт
-    contracts[contract_id] = {
-        "name": name,
-        "author": interaction.user.display_name,
-        "author_id": str(interaction.user.id),
-        "members": {},
-        "created_at": datetime.datetime.now()
-    }
-    
-    # Создаем View с кнопкой
-    view = View(timeout=None)
-    view.add_item(ContractJoinButton(contract_id))
-    
-    # Отправляем сообщение
-    embed = discord.Embed(
-        title="📋 Новый контракт",
-        description=f"**{name}**",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
-    embed.add_field(name="Статус", value="⏳ Набор (0/3)", inline=True)
-    embed.add_field(name="Время", value="5 минут", inline=True)
-    embed.add_field(name="Минимум", value="2 человека", inline=True)
-    embed.add_field(name="Требования", value="Навыки: слабые, средние, сильные", inline=False)
-    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
-    
-    await interaction.response.send_message(
-        content="@Контракт",
-        embed=embed,
-        view=view
-    )
-    
-    # Запускаем таймер
-    task = asyncio.create_task(contract_timer(contract_id))
-    contracts[contract_id]["timer_task"] = task
+        
+    except Exception as e:
+        print(f"❌ Ошибка в /contr: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await interaction.followup.send(
+                f"❌ Ошибка: {e}",
+                ephemeral=True
+            )
+        except:
+            pass
 
 # --- КОМАНДА: /cars ---
 @tree.command(
@@ -802,4 +802,4 @@ token = os.getenv('DISCORD_TOKEN')
 if token:
     client.run(token)
 else:
-    print("❌ ОШИБКА: DISCORD_TOKEN не найден в переменных окружения!")
+   
