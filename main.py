@@ -462,35 +462,62 @@ class ContractJoinButton(Button):
             ephemeral=True
         )
 
-# --- Таймер контракта с уведомлениями ---
-async def contract_timer(contract_id: str):
-    """Таймер для контракта с уведомлениями на 5 и 10 минут."""
-    
-    # Ждем 5 минут
-    await asyncio.sleep(300)  # 5 минут
-    
-    # Проверяем, существует ли еще контракт
+# --- Функция отправки уведомления ---
+async def send_contract_notification(contract_id: str, minutes: int, seconds: int = 0):
+    """Отправляет уведомление о контракте с тегами."""
     if contract_id not in contracts:
         return
     
     contract_data = contracts[contract_id]
+    members = contract_data["members"]
     
     # Проверяем, не завершен ли контракт
-    if len(contract_data["members"]) >= 3:
-        # Контракт уже завершен
+    if len(members) >= 3:
         return
     
-    # Отправляем уведомление о 5 минутах
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
-    if channel:
-        await channel.send(
-            f"⏰ **Осталось 5 минут!**\n"
-            f"Скорее ставьте реакции в контракт **{contract_data['name']}**!\n"
-            f"Нужно еще {3 - len(contract_data['members'])} человек."
-        )
+    if channel is None:
+        return
     
-    # Ждем еще 5 минут (всего 10)
-    await asyncio.sleep(300)  # еще 5 минут
+    # Формируем время
+    if seconds > 0:
+        time_text = f"{minutes} мин {seconds} сек"
+    else:
+        time_text = f"{minutes} минут"
+    
+    needed = 3 - len(members)
+    
+    await channel.send(
+        f"@Контракт @everyone\n"
+        f"⏰ **Осталось {time_text}!**\n"
+        f"Скорее ставьте реакции в контракт **{contract_data['name']}**!\n"
+        f"Нужно еще **{needed}** человек."
+    )
+
+# --- Таймер контракта с уведомлениями ---
+async def contract_timer(contract_id: str):
+    """Таймер для контракта с уведомлениями на 2:30, 5:00 и 7:30."""
+    
+    # Уведомление через 2 минуты 30 секунд
+    await asyncio.sleep(150)  # 2:30
+    
+    if contract_id in contracts:
+        await send_contract_notification(contract_id, 2, 30)
+    
+    # Уведомление через 5 минут (еще через 2:30)
+    await asyncio.sleep(150)  # еще 2:30 (всего 5:00)
+    
+    if contract_id in contracts:
+        await send_contract_notification(contract_id, 5, 0)
+    
+    # Уведомление через 7 минут 30 секунд (еще через 2:30)
+    await asyncio.sleep(150)  # еще 2:30 (всего 7:30)
+    
+    if contract_id in contracts:
+        await send_contract_notification(contract_id, 7, 30)
+    
+    # Ждем до 10 минут (еще 2:30)
+    await asyncio.sleep(150)  # еще 2:30 (всего 10:00)
     
     # Проверяем, существует ли еще контракт
     if contract_id not in contracts:
@@ -500,7 +527,6 @@ async def contract_timer(contract_id: str):
     
     # Проверяем, собралось ли достаточно участников
     if len(contract_data["members"]) >= 3:
-        # Контракт уже завершен
         return
     
     # Контракт провалился - удаляем сообщение и уведомляем
