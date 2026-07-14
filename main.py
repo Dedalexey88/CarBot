@@ -1015,6 +1015,70 @@ async def reminder_loop():
             print(f"❌ Ошибка в цикле напоминаний: {e}")
         await asyncio.sleep(600)
 
+# --- ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КОНТРАКТА ИЗ СООБЩЕНИЯ ---
+async def create_contract_from_message(message: discord.Message, name: str):
+    """Создает контракт из текстового сообщения."""
+    
+    print(f"🔵 Создание контракта из сообщения от {message.author.display_name}")
+    print(f"🔵 Название: {name}")
+    
+    channel = message.channel
+    
+    contract_id = f"{message.author.id}_{int(datetime.datetime.now().timestamp())}"
+    
+    contracts[contract_id] = {
+        "name": name,
+        "author": message.author.display_name,
+        "author_id": str(message.author.id),
+        "members": {},
+        "created_at": datetime.datetime.now(),
+        "message_id": None,
+        "time_left": "10 минут"
+    }
+    
+    print(f"✅ Контракт создан: {contract_id}")
+    
+    embed = discord.Embed(
+        title="📋 Контракт",
+        description=f"**{name}**",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Создал", value=message.author.mention, inline=True)
+    embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
+    embed.add_field(name="Осталось времени", value="10 минут", inline=True)
+    embed.add_field(name="Минимум", value="2 человека", inline=True)
+    embed.add_field(name="👥 Участники (0 человек)", value="🔴 Нет участников", inline=False)
+    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
+    
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
+    
+    try:
+        sent_message = await channel.send(
+            content="@Контракт @everyone",
+            embed=embed,
+            view=view
+        )
+        contracts[contract_id]["message_id"] = sent_message.id
+        print(f"✅ Сообщение отправлено: {sent_message.id}")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке сообщения: {e}")
+        if contract_id in contracts:
+            del contracts[contract_id]
+        return
+    
+    view = View(timeout=None)
+    view.add_item(ContractJoinButton(contract_id))
+    view.add_item(CancelContractButton(contract_id))
+    await sent_message.edit(view=view)
+    
+    try:
+        task = asyncio.create_task(contract_timer(contract_id))
+        contracts[contract_id]["timer_task"] = task
+        print(f"✅ Таймер запущен")
+    except Exception as e:
+        print(f"❌ Ошибка при запуске таймера: {e}")
+
 # --- ИСПРАВЛЕННЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ---
 @client.event
 async def on_message(message: discord.Message):
@@ -1028,82 +1092,22 @@ async def on_message(message: discord.Message):
     
     content = message.content.strip()
     
-    # Проверяем команду /contr (с пробелом или без)
+    # Проверяем команду /contr
     if content.lower().startswith('/contr'):
         text = content[6:].strip()
         if text:
-            class FakeInteraction:
-                def __init__(self, user, channel_id):
-                    self.user = user
-                    self.channel_id = channel_id
-                    self.response = None
-                
-                async def response(self):
-                    return self
-                
-                async def send_message(self, content, ephemeral=False):
-                    await message.channel.send(content)
-                
-                async def followup(self):
-                    return self
-            
-            fake_interaction = FakeInteraction(message.author, message.channel.id)
-            await contr_command(fake_interaction, text)
-            
+            await create_contract_from_message(message, text)
             try:
                 await message.delete()
             except:
                 pass
             return
     
-    # Проверяем команду !контракт (с пробелом или без)
+    # Проверяем команду !контракт
     if content.lower().startswith('!контракт'):
         text = content[9:].strip()
         if text:
-            class FakeInteraction:
-                def __init__(self, user, channel_id):
-                    self.user = user
-                    self.channel_id = channel_id
-                
-                async def response(self):
-                    return self
-                
-                async def send_message(self, content, ephemeral=False):
-                    await message.channel.send(content)
-                
-                async def followup(self):
-                    return self
-            
-            fake_interaction = FakeInteraction(message.author, message.channel.id)
-            await contr_command(fake_interaction, text)
-            
-            try:
-                await message.delete()
-            except:
-                pass
-            return
-    
-    # Проверяем команду !контракт (с пробелом или без) - альтернативный вариант
-    if content.lower().startswith('!контракт'):
-        text = content[9:].strip()
-        if text:
-            class FakeInteraction:
-                def __init__(self, user, channel_id):
-                    self.user = user
-                    self.channel_id = channel_id
-                
-                async def response(self):
-                    return self
-                
-                async def send_message(self, content, ephemeral=False):
-                    await message.channel.send(content)
-                
-                async def followup(self):
-                    return self
-            
-            fake_interaction = FakeInteraction(message.author, message.channel.id)
-            await contr_command(fake_interaction, text)
-            
+            await create_contract_from_message(message, text)
             try:
                 await message.delete()
             except:
