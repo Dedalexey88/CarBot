@@ -9,6 +9,7 @@ import asyncio
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
 CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
 CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
+VZP_CHANNEL_ID = 1523341052680081408  # ID канала для VZP
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 
 # --- Данные о машинах (7 штук) ---
@@ -24,6 +25,13 @@ cars = {
 
 # --- Данные для контрактов ---
 contracts = {}
+
+# --- Данные для VZP ---
+vzp_data = {
+    "members": {},
+    "message_id": None,
+    "channel_id": VZP_CHANNEL_ID
+}
 
 # --- НАСТРОЙКА БОТА ---
 intents = discord.Intents.default()
@@ -261,13 +269,53 @@ class SkillSelectView(View):
         print(f"✅ Участник добавлен: {interaction.user.display_name} ({skill_text})")
         print(f"📊 Всего участников: {len(contracts[self.contract_id]['members'])}")
         
+        # Показываем обновленный список
         await interaction.response.send_message(
-            f"✅ Вы записались на контракт с навыками: **{skill_text}**!",
+            f"✅ Вы записались на контракт с навыками: **{skill_text}**!\n\n"
+            f"📋 **Текущий список участников:**\n" + 
+            "\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()]),
             ephemeral=True
         )
         
         if len(contracts[self.contract_id]["members"]) >= 3:
             await finish_contract(self.contract_id)
+
+# --- Кнопка "Отказаться" ---
+class CancelContractButton(Button):
+    def __init__(self, contract_id: str):
+        super().__init__(
+            label="❌ Отказаться от выполнения",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"cancel_contract_{contract_id}"
+        )
+        self.contract_id = contract_id
+    
+    async def callback(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        
+        if self.contract_id not in contracts:
+            await interaction.response.send_message(
+                "❌ Контракт уже завершен!",
+                ephemeral=True
+            )
+            return
+        
+        if user_id not in contracts[self.contract_id]["members"]:
+            await interaction.response.send_message(
+                "❌ Вы не записаны на этот контракт!",
+                ephemeral=True
+            )
+            return
+        
+        # Удаляем участника
+        del contracts[self.contract_id]["members"][user_id]
+        
+        await interaction.response.send_message(
+            f"❌ Вы отказались от выполнения контракта!\n\n"
+            f"📋 **Текущий список участников:**\n" + 
+            ("\n".join([f"• {data['name']} - {data['skill']}" for data in contracts[self.contract_id]["members"].values()]) if contracts[self.contract_id]["members"] else "🔴 Нет участников"),
+            ephemeral=True
+        )
 
 # --- Кнопка вступления ---
 class ContractJoinButton(Button):
@@ -296,9 +344,13 @@ class ContractJoinButton(Button):
             )
             return
         
+        # Создаем View с выбором навыков и кнопкой отказа
         view = SkillSelectView(self.contract_id)
+        view.add_item(CancelContractButton(self.contract_id))
+        
         await interaction.response.send_message(
-            "📝 **Выберите уровень ваших навыков:**",
+            "📝 **Выберите уровень ваших навыков:**\n"
+            "Или нажмите 'Отказаться', если передумали.",
             view=view,
             ephemeral=True
         )
@@ -347,7 +399,7 @@ async def finish_contract(contract_id: str):
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
         msg = await channel.send(
-            content="@Контракт @everyone",  # <-- ТЕГИ @Контракт и @everyone
+            content="@Контракт @everyone",
             embed=embed
         )
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
@@ -437,12 +489,109 @@ class FreeButtonsView(View):
             await update_cars_channel()
         return callback
 
+# --- Кнопки для VZP ---
+class VZPJoinButton(Button):
+    def __init__(self):
+        super().__init__(
+            label="✅ Записаться на ВСку",
+            style=discord.ButtonStyle.success,
+            custom_id="vzp_join"
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        
+        if user_id in vzp_data["members"]:
+            await interaction.response.send_message(
+                "❌ Вы уже записаны на ВСку!",
+                ephemeral=True
+            )
+            return
+        
+        vzp_data["members"][user_id] = {
+            "name": interaction.user.display_name
+        }
+        
+        await interaction.response.send_message(
+            f"✅ Вы записались на ВСку!",
+            ephemeral=True
+        )
+        
+        await update_vzp_message()
+
+class VZPLeaveButton(Button):
+    def __init__(self):
+        super().__init__(
+            label="❌ Отписаться от ВСки",
+            style=discord.ButtonStyle.danger,
+            custom_id="vzp_leave"
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        
+        if user_id not in vzp_data["members"]:
+            await interaction.response.send_message(
+                "❌ Вы не записаны на ВСку!",
+                ephemeral=True
+            )
+            return
+        
+        del vzp_data["members"][user_id]
+        
+        await interaction.response.send_message(
+            f"❌ Вы отписались от ВСки!",
+            ephemeral=True
+        )
+        
+        await update_vzp_message()
+
+# --- Обновление сообщения VZP ---
+async def update_vzp_message():
+    channel = client.get_channel(VZP_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал VZP не найден!")
+        return
+    
+    # Формируем список участников
+    member_list = "\n".join([f"• {data['name']}" for data in vzp_data["members"].values()]) if vzp_data["members"] else "🔴 Нет участников"
+    
+    embed = discord.Embed(
+        title="⚔️ VZP - Сбор на ВСку",
+        description="**Атака и Защита**",
+        color=discord.Color.blue()
+    )
+    embed.add_field(
+        name=f"👥 Участники ({len(vzp_data['members'])} человек)",
+        value=member_list,
+        inline=False
+    )
+    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться или отписаться")
+    
+    view = View(timeout=None)
+    view.add_item(VZPJoinButton())
+    view.add_item(VZPLeaveButton())
+    
+    # Если сообщение уже есть - редактируем, иначе создаем новое
+    if vzp_data["message_id"]:
+        try:
+            msg = await channel.fetch_message(vzp_data["message_id"])
+            await msg.edit(content="@everyone", embed=embed, view=view)
+            return
+        except:
+            vzp_data["message_id"] = None
+    
+    # Создаем новое сообщение
+    msg = await channel.send(content="@everyone", embed=embed, view=view)
+    vzp_data["message_id"] = msg.id
+
 # --- СОБЫТИЕ on_ready ---
 @client.event
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     
-    for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин")]:
+    # Проверяем каналы
+    for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин"), (VZP_CHANNEL_ID, "VZP")]:
         if channel_id:
             channel = client.get_channel(channel_id)
             if channel:
@@ -450,6 +599,7 @@ async def on_ready():
             else:
                 print(f'❌ КАНАЛ {name} (ID: {channel_id}) НЕ НАЙДЕН!')
     
+    # Синхронизация команд
     try:
         guild = discord.Object(id=GUILD_ID)
         await tree.sync(guild=guild)
@@ -459,12 +609,16 @@ async def on_ready():
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
     
+    # Запуск каналов
     if CAR_CHANNEL_ID:
         await update_cars_channel()
     
+    if VZP_CHANNEL_ID:
+        await update_vzp_message()
+    
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
-# --- КОМАНДА: /contract ---
+# --- КОМАНДА: /contract (теперь работает) ---
 @tree.command(
     name="contract", 
     description="Создать новый контракт",
@@ -509,6 +663,7 @@ async def contract_command(interaction: discord.Interaction, name: str):
     
     view = View(timeout=None)
     view.add_item(ContractJoinButton(contract_id))
+    view.add_item(CancelContractButton(contract_id))
     
     embed = discord.Embed(
         title="📋 Новый контракт",
@@ -524,7 +679,7 @@ async def contract_command(interaction: discord.Interaction, name: str):
     
     try:
         sent_message = await channel.send(
-            content="@Контракт @everyone",  # <-- ТЕГИ @Контракт и @everyone
+            content="@Контракт @everyone",
             embed=embed,
             view=view
         )
@@ -555,7 +710,7 @@ async def contract_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"❌ Ошибка при ответе пользователю: {e}")
 
-# --- КОМАНДА: /contr (дубликат /contract) ---
+# --- КОМАНДА: /contr (оставлена для совместимости) ---
 @tree.command(
     name="contr", 
     description="Создать новый контракт",
@@ -564,87 +719,35 @@ async def contract_command(interaction: discord.Interaction, name: str):
 @app_commands.describe(name="Название контракта")
 async def contr_command(interaction: discord.Interaction, name: str):
     """Создает новый контракт в канале."""
+    await contract_command(interaction, name)
+
+# --- КОМАНДА: /vzp ---
+@tree.command(
+    name="vzp", 
+    description="Создать сбор на ВСку",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def vzp_command(interaction: discord.Interaction):
+    """Создает сбор на ВСку в канале VZP."""
     
-    print(f"🔵 Команда /contr вызвана пользователем {interaction.user.display_name}")
-    print(f"🔵 Название: {name}")
+    print(f"🔵 Команда /vzp вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     
-    if interaction.channel_id != CONTRACT_CHANNEL_ID:
+    if interaction.channel_id != VZP_CHANNEL_ID:
         await interaction.response.send_message(
-            f"❌ Эта команда доступна только в канале <#{CONTRACT_CHANNEL_ID}>!",
+            f"❌ Эта команда доступна только в канале <#{VZP_CHANNEL_ID}>!",
             ephemeral=True
         )
         return
     
-    channel = client.get_channel(CONTRACT_CHANNEL_ID)
-    if channel is None:
-        await interaction.response.send_message(
-            f"❌ Канал с ID {CONTRACT_CHANNEL_ID} не найден!",
-            ephemeral=True
-        )
-        return
+    # Очищаем список участников
+    vzp_data["members"] = {}
+    await update_vzp_message()
     
-    print(f"✅ Канал найден: {channel.name}")
-    
-    contract_id = f"{interaction.user.id}_{int(datetime.datetime.now().timestamp())}"
-    
-    contracts[contract_id] = {
-        "name": name,
-        "author": interaction.user.display_name,
-        "author_id": str(interaction.user.id),
-        "members": {},
-        "created_at": datetime.datetime.now()
-    }
-    
-    print(f"✅ Контракт создан: {contract_id}")
-    
-    view = View(timeout=None)
-    view.add_item(ContractJoinButton(contract_id))
-    
-    embed = discord.Embed(
-        title="📋 Новый контракт",
-        description=f"**{name}**",
-        color=discord.Color.blue()
+    await interaction.response.send_message(
+        f"✅ Сбор на ВСку создан!",
+        ephemeral=True
     )
-    embed.add_field(name="Создал", value=interaction.user.mention, inline=True)
-    embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
-    embed.add_field(name="Время на сбор", value="5 минут", inline=True)
-    embed.add_field(name="Минимум", value="2 человека", inline=True)
-    embed.add_field(name="Требования", value="Выберите уровень навыков: Слабые / Средние / Сильные", inline=False)
-    embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться")
-    
-    try:
-        sent_message = await channel.send(
-            content="@Контракт @everyone",  # <-- ТЕГИ @Контракт и @everyone
-            embed=embed,
-            view=view
-        )
-        print(f"✅ Сообщение отправлено: {sent_message.id}")
-    except Exception as e:
-        print(f"❌ Ошибка при отправке сообщения: {e}")
-        await interaction.response.send_message(
-            f"❌ Не удалось отправить сообщение: {e}",
-            ephemeral=True
-        )
-        if contract_id in contracts:
-            del contracts[contract_id]
-        return
-    
-    try:
-        task = asyncio.create_task(contract_timer(contract_id))
-        contracts[contract_id]["timer_task"] = task
-        print(f"✅ Таймер запущен")
-    except Exception as e:
-        print(f"❌ Ошибка при запуске таймера: {e}")
-    
-    try:
-        await interaction.response.send_message(
-            f"✅ Контракт **{name}** успешно создан!",
-            ephemeral=True
-        )
-        print(f"✅ Ответ отправлен пользователю")
-    except Exception as e:
-        print(f"❌ Ошибка при ответе пользователю: {e}")
 
 # --- КОМАНДА: /cars ---
 @tree.command(
