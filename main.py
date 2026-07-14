@@ -880,4 +880,16 @@ async def free_command(interaction: discord.Interaction, car_name: str):
     user_name = cars[car_name]["user"]
     cars[car_name]["status"] = "Свободна"
     cars[car_name]["user"] = None
-    cars[car_name]["end
+    cars[car_name]["end_time"] = None
+    await interaction.response.send_message(
+        f"✅ Машина '{car_name}' освобождена!",
+        ephemeral=False
+    )
+    await update_cars_channel()
+
+# --- ЗАПУСК БОТА ---
+token = os.getenv('DISCORD_TOKEN')
+if token:
+    client.run(token)
+else:
+    print("❌ ОШИБКА: DISCORD_TOKEN не найден в переменных окружения!")
