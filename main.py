@@ -463,21 +463,21 @@ class ContractJoinButton(Button):
             ephemeral=True
         )
 
-# --- Функция отправки уведомления ---
+# --- Функция отправки уведомления (сохранение ID сообщений для удаления) ---
 async def send_contract_notification(contract_id: str, minutes: int, seconds: int = 0):
-    """Отправляет уведомление о контракте с тегами."""
+    """Отправляет уведомление о контракте с тегами и сохраняет ID сообщения."""
     if contract_id not in contracts:
-        return
+        return None
     
     contract_data = contracts[contract_id]
     members = contract_data["members"]
     
     if len(members) >= 3:
-        return
+        return None
     
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel is None:
-        return
+        return None
     
     if seconds > 0:
         time_text = f"{minutes} мин {seconds} сек"
@@ -486,42 +486,104 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
     
     needed = 3 - len(members)
     
-    await channel.send(
+    msg = await channel.send(
         f"@Контракт @everyone\n"
         f"⏰ **Осталось {time_text}!**\n"
         f"Скорее ставьте реакции в контракт **{contract_data['name']}**!\n"
         f"Нужно еще **{needed}** человек."
     )
+    return msg.id
 
-# --- Таймер контракта с уведомлениями ---
+# --- Таймер контракта с уведомлениями и удалением ---
 async def contract_timer(contract_id: str):
-    await asyncio.sleep(150)  # 2:30
+    notification_ids = []
     
+    # 2:30 - осталось 7:30
+    await asyncio.sleep(150)
     if contract_id in contracts:
-        await send_contract_notification(contract_id, 7, 30)
+        msg_id = await send_contract_notification(contract_id, 7, 30)
+        if msg_id:
+            notification_ids.append(msg_id)
     
-    await asyncio.sleep(150)  # 5:00
-    
+    # 5:00 - осталось 5:00
+    await asyncio.sleep(150)
     if contract_id in contracts:
-        await send_contract_notification(contract_id, 5, 0)
+        msg_id = await send_contract_notification(contract_id, 5, 0)
+        if msg_id:
+            notification_ids.append(msg_id)
     
-    await asyncio.sleep(150)  # 7:30
-    
+    # 7:30 - осталось 2:30
+    await asyncio.sleep(150)
     if contract_id in contracts:
-        await send_contract_notification(contract_id, 2, 30)
+        msg_id = await send_contract_notification(contract_id, 2, 30)
+        if msg_id:
+            notification_ids.append(msg_id)
     
-    await asyncio.sleep(150)  # 10:00
+    # 10:00 - финальная проверка
+    await asyncio.sleep(150)
     
     if contract_id not in contracts:
         return
     
     contract_data = contracts[contract_id]
+    members = contract_data["members"]
     
-    if len(contract_data["members"]) >= 3:
-        return
-    
+    # Удаляем все уведомления
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
+        for msg_id in notification_ids:
+            try:
+                msg = await channel.fetch_message(msg_id)
+                await msg.delete()
+            except:
+                pass
+    
+    # Проверяем результат
+    if len(members) >= 2:
+        # Контракт успешен - минимум 2 человека
+        embed = discord.Embed(
+            title="✅ Контракт сформирован!",
+            description=f"**{contract_data['name']}**",
+            color=discord.Color.green()
+        )
+        
+        embed.add_field(name="Создал", value=contract_data['author'], inline=True)
+        
+        member_list = []
+        for user_id, data in members.items():
+            member_list.append(
+                f"**{data['name']}**\n"
+                f"  📊 Навыки: {data['skill']}"
+            )
+        
+        embed.add_field(
+            name=f"👥 Участники ({len(members)} человек)",
+            value="\n\n".join(member_list),
+            inline=False
+        )
+        embed.set_footer(text="Удачи в выполнении контракта! 🍀")
+        
+        # Удаляем старое сообщение с контрактом
+        if "message_id" in contract_data and contract_data["message_id"]:
+            try:
+                msg = await channel.fetch_message(contract_data["message_id"])
+                await msg.delete()
+            except:
+                pass
+        
+        # Отправляем финальное сообщение
+        msg = await channel.send(
+            content="@Контракт @everyone",
+            embed=embed
+        )
+        await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
+        
+    else:
+        # Контракт провалился
+        # Формируем список записавшихся
+        member_list = "\n".join([f"• {data['name']}" for data in members.values()]) if members else "🔴 Никто не записался"
+        
+        # Удаляем старое сообщение с контрактом
         if "message_id" in contract_data and contract_data["message_id"]:
             try:
                 msg = await channel.fetch_message(contract_data["message_id"])
@@ -531,13 +593,16 @@ async def contract_timer(contract_id: str):
         
         await channel.send(
             f"❌ **Сбор на контракт '{contract_data['name']}' провалился!**\n"
-            f"Недостаточно реакций. Собрано: {len(contract_data['members'])} из 3 человек."
+            f"**Создал:** {contract_data['author']}\n"
+            f"**Записалось:** {len(members)} человек\n"
+            f"**Список записавшихся:**\n{member_list}"
         )
     
+    # Удаляем контракт из памяти
     if contract_id in contracts:
         del contracts[contract_id]
 
-# --- Функция завершения контракта ---
+# --- Функция завершения контракта (при досрочном сборе 3 человек) ---
 async def finish_contract(contract_id: str):
     if contract_id not in contracts:
         return
@@ -566,11 +631,14 @@ async def finish_contract(contract_id: str):
         del contracts[contract_id]
         return
     
+    # Контракт успешно сформирован - желаем удачи
     embed = discord.Embed(
         title="✅ Контракт сформирован!",
         description=f"**{contract_data['name']}**",
         color=discord.Color.green()
     )
+    
+    embed.add_field(name="Создал", value=contract_data['author'], inline=True)
     
     member_list = []
     for user_id, data in members.items():
@@ -862,8 +930,7 @@ async def update_vzp_messages():
             vzp_data["attack_message_id"] = msg.id
         
         if len(vzp_data["attack_members"]) >= vzp_data["attack_target"]:
-            vzp_data["attack_completed"] = True
-            try:
+            vzp_data["attack_completed"] = True            try:
                 msg = await channel.fetch_message(vzp_data["attack_message_id"])
                 await msg.delete()
                 vzp_data["attack_message_id"] = None
@@ -1072,7 +1139,6 @@ async def create_contract_from_message(message: discord.Message, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
-    # Запускаем таймер с обнулением (всегда с 0)
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
@@ -1083,17 +1149,14 @@ async def create_contract_from_message(message: discord.Message, name: str):
 # --- ИСПРАВЛЕННЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ---
 @client.event
 async def on_message(message: discord.Message):
-    # Игнорируем сообщения от бота
     if message.author == client.user:
         return
     
-    # Проверяем, что сообщение в канале контрактов
     if message.channel.id != CONTRACT_CHANNEL_ID:
         return
     
     content = message.content.strip()
     
-    # Проверяем команду /contr
     if content.lower().startswith('/contr'):
         text = content[6:].strip()
         if text:
@@ -1104,7 +1167,6 @@ async def on_message(message: discord.Message):
                 pass
             return
     
-    # Проверяем команду !контракт
     if content.lower().startswith('!контракт'):
         text = content[9:].strip()
         if text:
@@ -1236,7 +1298,6 @@ async def contr_command(interaction: discord.Interaction, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
-    # Запускаем таймер с обнулением (всегда с 0)
     try:
         task = asyncio.create_task(contract_timer(contract_id))
         contracts[contract_id]["timer_task"] = task
