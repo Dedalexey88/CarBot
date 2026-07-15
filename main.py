@@ -899,6 +899,7 @@ async def update_vzp_messages():
         print(f"❌ Канал VZP не найден!")
         return
     
+    # --- Обновляем сообщение для атаки ---
     if not vzp_data["attack_completed"] and vzp_data["attack_target"] > 0:
         attack_list = "\n".join([f"• {data['name']}" for data in vzp_data["attack_members"].values()]) if vzp_data["attack_members"] else "🔴 Нет участников"
         
@@ -930,13 +931,15 @@ async def update_vzp_messages():
             vzp_data["attack_message_id"] = msg.id
         
         if len(vzp_data["attack_members"]) >= vzp_data["attack_target"]:
-            vzp_data["attack_completed"] = True            try:
+            vzp_data["attack_completed"] = True
+            try:
                 msg = await channel.fetch_message(vzp_data["attack_message_id"])
                 await msg.delete()
                 vzp_data["attack_message_id"] = None
             except:
                 pass
     
+    # --- Обновляем сообщение для защиты ---
     if not vzp_data["defense_completed"] and vzp_data["defense_target"] > 0:
         defense_list = "\n".join([f"• {data['name']}" for data in vzp_data["defense_members"].values()]) if vzp_data["defense_members"] else "🔴 Нет участников"
         
