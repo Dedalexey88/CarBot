@@ -47,7 +47,7 @@ vzp_data = {
     "reminder_task": None,
     "attack_completed": False,
     "defense_completed": False,
-    "final_message_id": None  # ID финального сообщения
+    "final_message_id": None
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -464,9 +464,8 @@ class ContractJoinButton(Button):
             ephemeral=True
         )
 
-# --- Функция отправки уведомления (сохранение ID сообщений для удаления) ---
+# --- Функция отправки уведомления ---
 async def send_contract_notification(contract_id: str, minutes: int, seconds: int = 0):
-    """Отправляет уведомление о контракте с тегами и сохраняет ID сообщения."""
     if contract_id not in contracts:
         return None
     
@@ -495,32 +494,28 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
     )
     return msg.id
 
-# --- Таймер контракта с уведомлениями и удалением ---
+# --- Таймер контракта ---
 async def contract_timer(contract_id: str):
     notification_ids = []
     
-    # 2:30 - осталось 7:30
     await asyncio.sleep(150)
     if contract_id in contracts:
         msg_id = await send_contract_notification(contract_id, 7, 30)
         if msg_id:
             notification_ids.append(msg_id)
     
-    # 5:00 - осталось 5:00
     await asyncio.sleep(150)
     if contract_id in contracts:
         msg_id = await send_contract_notification(contract_id, 5, 0)
         if msg_id:
             notification_ids.append(msg_id)
     
-    # 7:30 - осталось 2:30
     await asyncio.sleep(150)
     if contract_id in contracts:
         msg_id = await send_contract_notification(contract_id, 2, 30)
         if msg_id:
             notification_ids.append(msg_id)
     
-    # 10:00 - финальная проверка
     await asyncio.sleep(150)
     
     if contract_id not in contracts:
@@ -529,7 +524,6 @@ async def contract_timer(contract_id: str):
     contract_data = contracts[contract_id]
     members = contract_data["members"]
     
-    # Удаляем все уведомления
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
     if channel:
         for msg_id in notification_ids:
@@ -539,9 +533,7 @@ async def contract_timer(contract_id: str):
             except:
                 pass
     
-    # Проверяем результат
     if len(members) >= 2:
-        # Контракт успешен - минимум 2 человека
         embed = discord.Embed(
             title="✅ Контракт сформирован!",
             description=f"**{contract_data['name']}**",
@@ -564,7 +556,6 @@ async def contract_timer(contract_id: str):
         )
         embed.set_footer(text="Удачи в выполнении контракта! 🍀")
         
-        # Удаляем старое сообщение с контрактом
         if "message_id" in contract_data and contract_data["message_id"]:
             try:
                 msg = await channel.fetch_message(contract_data["message_id"])
@@ -572,7 +563,6 @@ async def contract_timer(contract_id: str):
             except:
                 pass
         
-        # Отправляем финальное сообщение
         msg = await channel.send(
             content="@Контракт @everyone",
             embed=embed
@@ -580,11 +570,8 @@ async def contract_timer(contract_id: str):
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
         
     else:
-        # Контракт провалился
-        # Формируем список записавшихся
         member_list = "\n".join([f"• {data['name']}" for data in members.values()]) if members else "🔴 Никто не записался"
         
-        # Удаляем старое сообщение с контрактом
         if "message_id" in contract_data and contract_data["message_id"]:
             try:
                 msg = await channel.fetch_message(contract_data["message_id"])
@@ -599,11 +586,10 @@ async def contract_timer(contract_id: str):
             f"**Список записавшихся:**\n{member_list}"
         )
     
-    # Удаляем контракт из памяти
     if contract_id in contracts:
         del contracts[contract_id]
 
-# --- Функция завершения контракта (при досрочном сборе 3 человек) ---
+# --- Функция завершения контракта ---
 async def finish_contract(contract_id: str):
     if contract_id not in contracts:
         return
@@ -632,7 +618,6 @@ async def finish_contract(contract_id: str):
         del contracts[contract_id]
         return
     
-    # Контракт успешно сформирован - желаем удачи
     embed = discord.Embed(
         title="✅ Контракт сформирован!",
         description=f"**{contract_data['name']}**",
@@ -900,7 +885,6 @@ async def update_vzp_messages():
         print(f"❌ Канал VZP не найден!")
         return
     
-    # --- Обновляем сообщение для атаки ---
     if not vzp_data["attack_completed"] and vzp_data["attack_target"] > 0:
         attack_list = "\n".join([f"• {data['name']}" for data in vzp_data["attack_members"].values()]) if vzp_data["attack_members"] else "🔴 Нет участников"
         
@@ -940,7 +924,6 @@ async def update_vzp_messages():
             except:
                 pass
     
-    # --- Обновляем сообщение для защиты ---
     if not vzp_data["defense_completed"] and vzp_data["defense_target"] > 0:
         defense_list = "\n".join([f"• {data['name']}" for data in vzp_data["defense_members"].values()]) if vzp_data["defense_members"] else "🔴 Нет участников"
         
@@ -980,7 +963,6 @@ async def update_vzp_messages():
             except:
                 pass
     
-    # Проверяем, собраны ли обе команды
     if vzp_data["attack_completed"] and vzp_data["defense_completed"] and not vzp_data["is_completed"]:
         await complete_vzp()
 
@@ -1007,7 +989,6 @@ async def complete_vzp():
     attack_text = "\n".join([f"• {name}" for name in attack_list]) if attack_list else "Нет"
     defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "Нет"
     
-    # Добавляем информацию о противнике, если есть
     if vzp_data["attack_text"]:
         embed.add_field(
             name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
@@ -1043,15 +1024,13 @@ async def complete_vzp():
     
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel:
-        # Отправляем финальное сообщение (НЕ УДАЛЯЕМ)
-        msg = await channel.send(content="@everyone", embed=embed)
-        vzp_data["final_message_id"] = msg.id
+        # Удаляем старые сообщения с кнопками
+        messages_to_delete = []
         
-        # Удаляем старые сообщения с кнопками (если есть)
         if vzp_data["attack_message_id"]:
             try:
                 msg = await channel.fetch_message(vzp_data["attack_message_id"])
-                await msg.delete()
+                messages_to_delete.append(msg)
                 vzp_data["attack_message_id"] = None
             except:
                 pass
@@ -1059,10 +1038,48 @@ async def complete_vzp():
         if vzp_data["defense_message_id"]:
             try:
                 msg = await channel.fetch_message(vzp_data["defense_message_id"])
-                await msg.delete()
+                messages_to_delete.append(msg)
                 vzp_data["defense_message_id"] = None
             except:
                 pass
+        
+        for msg in messages_to_delete:
+            try:
+                await msg.delete()
+                await asyncio.sleep(0.3)
+            except:
+                pass
+        
+        # Отправляем финальное сообщение
+        final_msg = await channel.send(content="@everyone", embed=embed)
+        vzp_data["final_message_id"] = final_msg.id
+        
+        # Очищаем канал, но НЕ удаляем финальное сообщение
+        try:
+            messages = []
+            async for msg in channel.history(limit=30):
+                messages.append(msg)
+            
+            exclude_ids = [final_msg.id]
+            for msg in messages:
+                if msg.pinned:
+                    exclude_ids.append(msg.id)
+            
+            deleted_count = 0
+            for msg in messages:
+                if msg.id not in exclude_ids and not msg.pinned:
+                    try:
+                        await msg.delete()
+                        deleted_count += 1
+                        await asyncio.sleep(0.3)
+                    except:
+                        pass
+            
+            if deleted_count > 0:
+                print(f"🗑️ Удалено {deleted_count} старых сообщений в канале VZP")
+                
+        except Exception as e:
+            print(f"⚠️ Ошибка при очистке: {e}")
 
 # --- Функция проверки времени для напоминаний ---
 def should_send_reminder():
@@ -1107,10 +1124,8 @@ async def reminder_loop():
             print(f"❌ Ошибка в цикле напоминаний: {e}")
         await asyncio.sleep(600)
 
-# --- ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КОНТРАКТА ИЗ СООБЩЕНИЯ ---
+# --- Функция для создания контракта из сообщения ---
 async def create_contract_from_message(message: discord.Message, name: str):
-    """Создает контракт из текстового сообщения с обнулением таймера."""
-    
     print(f"🔵 Создание контракта из сообщения от {message.author.display_name}")
     print(f"🔵 Название: {name}")
     
@@ -1171,7 +1186,7 @@ async def create_contract_from_message(message: discord.Message, name: str):
     except Exception as e:
         print(f"❌ Ошибка при запуске таймера: {e}")
 
-# --- ИСПРАВЛЕННЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ---
+# --- Обработчик сообщений ---
 @client.event
 async def on_message(message: discord.Message):
     if message.author == client.user:
