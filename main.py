@@ -980,15 +980,19 @@ async def complete_vzp():
     attack_list = [data['name'] for data in vzp_data["attack_members"].values()]
     defense_list = [data['name'] for data in vzp_data["defense_members"].values()]
     
+    # Определяем формат count x count
+    count = vzp_data["attack_target"]
+    
     embed = discord.Embed(
-        title="⚔️ Реакции собраны!",
+        title=f"⚔️ Война за предприятия! {count} x {count}",
         description="**Удачи парни, принесите Дону победу!**",
         color=discord.Color.gold()
     )
     
-    attack_text = "\n".join([f"• {name}" for name in attack_list]) if attack_list else "Нет"
-    defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "Нет"
+    attack_text = "\n".join([f"• {name}" for name in attack_list]) if attack_list else "🔴 Нет участников"
+    defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "🔴 Нет участников"
     
+    # Добавляем информацию о противнике, если есть
     if vzp_data["attack_text"]:
         embed.add_field(
             name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
@@ -1050,7 +1054,7 @@ async def complete_vzp():
             except:
                 pass
         
-        # Отправляем финальное сообщение
+        # Отправляем финальное сообщение (НЕ УДАЛЯЕМ)
         final_msg = await channel.send(content="@everyone", embed=embed)
         vzp_data["final_message_id"] = final_msg.id
         
