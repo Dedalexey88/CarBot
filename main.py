@@ -40,8 +40,6 @@ vzp_data = {
     "channel_id": VZP_CHANNEL_ID,
     "attack_target": 0,
     "defense_target": 0,
-    "attack_text": "",
-    "defense_text": "",
     "is_completed": False,
     "last_reminder_time": None,
     "reminder_task": None,
@@ -890,7 +888,7 @@ async def update_vzp_messages():
         
         embed_atk = discord.Embed(
             title="⚔️ Сбор на Атаку",
-            description=f"**{vzp_data['attack_text']}**" if vzp_data["attack_text"] else "**Сбор на атаку**",
+            description=f"**Сбор на атаку**",
             color=discord.Color.red()
         )
         embed_atk.add_field(
@@ -929,7 +927,7 @@ async def update_vzp_messages():
         
         embed_def = discord.Embed(
             title="🛡️ Сбор на Защиту",
-            description=f"**{vzp_data['defense_text']}**" if vzp_data["defense_text"] else "**Сбор на защиту**",
+            description=f"**Сбор на защиту**",
             color=discord.Color.blue()
         )
         embed_def.add_field(
@@ -985,6 +983,7 @@ async def complete_vzp():
     
     count = vzp_data["attack_target"]
     
+    # ПЕРВОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ
     embed = discord.Embed(
         title=f"⚔️ Война за предприятия! {count} x {count}",
         description="**Удачи парни, принесите Дону победу!**",
@@ -994,31 +993,17 @@ async def complete_vzp():
     attack_text = "\n".join([f"• {name}" for name in attack_list]) if attack_list else "🔴 Нет участников"
     defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "🔴 Нет участников"
     
-    if vzp_data["attack_text"]:
-        embed.add_field(
-            name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
-            value=f"Против: {vzp_data['attack_text']}\n{attack_text}",
-            inline=True
-        )
-    else:
-        embed.add_field(
-            name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
-            value=attack_text,
-            inline=True
-        )
+    embed.add_field(
+        name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
+        value=attack_text,
+        inline=True
+    )
     
-    if vzp_data["defense_text"]:
-        embed.add_field(
-            name=f"🛡️ Защита ({len(defense_list)}/{vzp_data['defense_target']})",
-            value=f"Против: {vzp_data['defense_text']}\n{defense_text}",
-            inline=True
-        )
-    else:
-        embed.add_field(
-            name=f"🛡️ Защита ({len(defense_list)}/{vzp_data['defense_target']})",
-            value=defense_text,
-            inline=True
-        )
+    embed.add_field(
+        name=f"🛡️ Защита ({len(defense_list)}/{vzp_data['defense_target']})",
+        value=defense_text,
+        inline=True
+    )
     
     embed.add_field(
         name=f"👥 Всего участников",
@@ -1055,9 +1040,39 @@ async def complete_vzp():
             except:
                 pass
         
-        # Отправляем финальное сообщение
+        # ОТПРАВЛЯЕМ ПЕРВОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ
         await channel.send(content="@everyone", embed=embed)
-        print(f"✅ Финальное сообщение VZP отправлено")
+        print(f"✅ Первое финальное сообщение VZP отправлено")
+        
+        # ВТОРОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ (повтор списка)
+        embed2 = discord.Embed(
+            title=f"⚔️ Война за предприятия! {count} x {count}",
+            description="**Удачи парни, принесите Дону победу!**",
+            color=discord.Color.gold()
+        )
+        
+        embed2.add_field(
+            name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
+            value=attack_text,
+            inline=True
+        )
+        
+        embed2.add_field(
+            name=f"🛡️ Защита ({len(defense_list)}/{vzp_data['defense_target']})",
+            value=defense_text,
+            inline=True
+        )
+        
+        embed2.add_field(
+            name=f"👥 Всего участников",
+            value=f"{len(attack_list) + len(defense_list)} человек",
+            inline=True
+        )
+        embed2.set_footer(text="Удачи! 🎯")
+        
+        # ОТПРАВЛЯЕМ ВТОРОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ (дубль)
+        await channel.send(content="@everyone", embed=embed2)
+        print(f"✅ Второе финальное сообщение VZP отправлено")
 
 # --- Функция проверки времени для напоминаний ---
 def should_send_reminder():
@@ -1086,7 +1101,7 @@ async def send_reminder():
     
     await channel.send(
         "⏰ **Парни прошло 2 часа, как вы не забивали вску, не пора ли собрать и навалять?**\n"
-        f"Используйте `/vzp_atk {vzp_data['attack_target']} [текст]` и `/vzp_def {vzp_data['defense_target']} [текст]` для сбора реакций!"
+        f"Используйте `/vzp_atk {vzp_data['attack_target']}` и `/vzp_def {vzp_data['defense_target']}` для сбора реакций!"
     )
     
     vzp_data["last_reminder_time"] = datetime.datetime.now()
@@ -1228,8 +1243,6 @@ async def on_ready():
     vzp_data["attack_completed"] = False
     vzp_data["defense_completed"] = False
     vzp_data["last_reminder_time"] = None
-    vzp_data["attack_text"] = ""
-    vzp_data["defense_text"] = ""
     vzp_data["final_message_id"] = None
     
     client.loop.create_task(reminder_loop())
@@ -1340,14 +1353,12 @@ async def contr_command(interaction: discord.Interaction, name: str):
     guild=discord.Object(id=GUILD_ID)
 )
 @app_commands.describe(
-    count="Количество человек для атаки (например: 6)",
-    text="Кто противник (например: skipper)"
+    count="Количество человек для атаки (например: 6)"
 )
-async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50], text: str = ""):
+async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50]):
     print(f"🔵 Команда /vzp_atk вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     print(f"🔵 Нужно человек: {count}")
-    print(f"🔵 Текст: {text}")
     
     if interaction.channel_id != VZP_CHANNEL_ID:
         await interaction.response.send_message(
@@ -1367,21 +1378,14 @@ async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.
     vzp_data["attack_members"] = {}
     vzp_data["attack_message_id"] = None
     vzp_data["attack_completed"] = False
-    vzp_data["attack_text"] = text if text else ""
     vzp_data["final_message_id"] = None
     
     await update_vzp_messages()
     
-    if text:
-        await interaction.response.send_message(
-            f"✅ Сбор на атаку создан! Нужно **{count}** человек против **{text}**.",
-            ephemeral=True
-        )
-    else:
-        await interaction.response.send_message(
-            f"✅ Сбор на атаку создан! Нужно **{count}** человек.",
-            ephemeral=True
-        )
+    await interaction.response.send_message(
+        f"✅ Сбор на атаку создан! Нужно **{count}** человек.",
+        ephemeral=True
+    )
 
 # --- КОМАНДА: /vzp_def ---
 @tree.command(
@@ -1390,14 +1394,12 @@ async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.
     guild=discord.Object(id=GUILD_ID)
 )
 @app_commands.describe(
-    count="Количество человек для защиты (например: 6)",
-    text="Кто противник (например: skipper)"
+    count="Количество человек для защиты (например: 6)"
 )
-async def vzp_def_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50], text: str = ""):
+async def vzp_def_command(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50]):
     print(f"🔵 Команда /vzp_def вызвана пользователем {interaction.user.display_name}")
     print(f"🔵 Канал: {interaction.channel_id}")
     print(f"🔵 Нужно человек: {count}")
-    print(f"🔵 Текст: {text}")
     
     if interaction.channel_id != VZP_CHANNEL_ID:
         await interaction.response.send_message(
@@ -1417,21 +1419,14 @@ async def vzp_def_command(interaction: discord.Interaction, count: app_commands.
     vzp_data["defense_members"] = {}
     vzp_data["defense_message_id"] = None
     vzp_data["defense_completed"] = False
-    vzp_data["defense_text"] = text if text else ""
     vzp_data["final_message_id"] = None
     
     await update_vzp_messages()
     
-    if text:
-        await interaction.response.send_message(
-            f"✅ Сбор на защиту создан! Нужно **{count}** человек против **{text}**.",
-            ephemeral=True
-        )
-    else:
-        await interaction.response.send_message(
-            f"✅ Сбор на защиту создан! Нужно **{count}** человек.",
-            ephemeral=True
-        )
+    await interaction.response.send_message(
+        f"✅ Сбор на защиту создан! Нужно **{count}** человек.",
+        ephemeral=True
+    )
 
 # --- КОМАНДА: /cars ---
 @tree.command(
