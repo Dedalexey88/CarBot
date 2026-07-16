@@ -46,7 +46,8 @@ vzp_data = {
     "last_reminder_time": None,
     "reminder_task": None,
     "attack_completed": False,
-    "defense_completed": False
+    "defense_completed": False,
+    "final_message_id": None  # ID финального сообщения
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -979,6 +980,7 @@ async def update_vzp_messages():
             except:
                 pass
     
+    # Проверяем, собраны ли обе команды
     if vzp_data["attack_completed"] and vzp_data["defense_completed"] and not vzp_data["is_completed"]:
         await complete_vzp()
 
@@ -998,13 +1000,14 @@ async def complete_vzp():
     
     embed = discord.Embed(
         title="⚔️ Реакции собраны!",
-        description="**Вперёд парни принесите Дону победу!**",
+        description="**Удачи парни, принесите Дону победу!**",
         color=discord.Color.gold()
     )
     
     attack_text = "\n".join([f"• {name}" for name in attack_list]) if attack_list else "Нет"
     defense_text = "\n".join([f"• {name}" for name in defense_list]) if defense_list else "Нет"
     
+    # Добавляем информацию о противнике, если есть
     if vzp_data["attack_text"]:
         embed.add_field(
             name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
@@ -1040,7 +1043,26 @@ async def complete_vzp():
     
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel:
-        await channel.send(content="@everyone", embed=embed)
+        # Отправляем финальное сообщение (НЕ УДАЛЯЕМ)
+        msg = await channel.send(content="@everyone", embed=embed)
+        vzp_data["final_message_id"] = msg.id
+        
+        # Удаляем старые сообщения с кнопками (если есть)
+        if vzp_data["attack_message_id"]:
+            try:
+                msg = await channel.fetch_message(vzp_data["attack_message_id"])
+                await msg.delete()
+                vzp_data["attack_message_id"] = None
+            except:
+                pass
+        
+        if vzp_data["defense_message_id"]:
+            try:
+                msg = await channel.fetch_message(vzp_data["defense_message_id"])
+                await msg.delete()
+                vzp_data["defense_message_id"] = None
+            except:
+                pass
 
 # --- Функция проверки времени для напоминаний ---
 def should_send_reminder():
@@ -1215,6 +1237,7 @@ async def on_ready():
     vzp_data["last_reminder_time"] = None
     vzp_data["attack_text"] = ""
     vzp_data["defense_text"] = ""
+    vzp_data["final_message_id"] = None
     
     client.loop.create_task(reminder_loop())
     
@@ -1352,6 +1375,7 @@ async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.
     vzp_data["attack_message_id"] = None
     vzp_data["attack_completed"] = False
     vzp_data["attack_text"] = text if text else ""
+    vzp_data["final_message_id"] = None
     
     await update_vzp_messages()
     
@@ -1401,6 +1425,7 @@ async def vzp_def_command(interaction: discord.Interaction, count: app_commands.
     vzp_data["defense_message_id"] = None
     vzp_data["defense_completed"] = False
     vzp_data["defense_text"] = text if text else ""
+    vzp_data["final_message_id"] = None
     
     await update_vzp_messages()
     
