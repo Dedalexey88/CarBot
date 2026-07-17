@@ -915,12 +915,22 @@ async def update_vzp_messages():
         
         if len(vzp_data["attack_members"]) >= vzp_data["attack_target"]:
             vzp_data["attack_completed"] = True
-            # НЕ УДАЛЯЕМ СООБЩЕНИЕ, а просто убираем кнопки
             if vzp_data["attack_message_id"]:
                 try:
                     msg = await channel.fetch_message(vzp_data["attack_message_id"])
-                    # Редактируем сообщение, убирая кнопки
-                    await msg.edit(view=None)
+                    embed = discord.Embed(
+                        title="⚔️ Список участников:",
+                        description=f"**Сбор на атаку завершен!**",
+                        color=discord.Color.green()
+                    )
+                    attack_list = "\n".join([f"• {data['name']}" for data in vzp_data["attack_members"].values()]) if vzp_data["attack_members"] else "🔴 Нет участников"
+                    embed.add_field(
+                        name=f"👥 Участники ({len(vzp_data['attack_members'])}/{vzp_data['attack_target']})",
+                        value=attack_list,
+                        inline=False
+                    )
+                    embed.set_footer(text="Вперёд парни, принесите Дону победу!")
+                    await msg.edit(embed=embed, view=None)
                     vzp_data["attack_message_id"] = None
                 except:
                     pass
@@ -957,12 +967,22 @@ async def update_vzp_messages():
         
         if len(vzp_data["defense_members"]) >= vzp_data["defense_target"]:
             vzp_data["defense_completed"] = True
-            # НЕ УДАЛЯЕМ СООБЩЕНИЕ, а просто убираем кнопки
             if vzp_data["defense_message_id"]:
                 try:
                     msg = await channel.fetch_message(vzp_data["defense_message_id"])
-                    # Редактируем сообщение, убирая кнопки
-                    await msg.edit(view=None)
+                    embed = discord.Embed(
+                        title="🛡️ Список участников:",
+                        description=f"**Сбор на защиту завершен!**",
+                        color=discord.Color.green()
+                    )
+                    defense_list = "\n".join([f"• {data['name']}" for data in vzp_data["defense_members"].values()]) if vzp_data["defense_members"] else "🔴 Нет участников"
+                    embed.add_field(
+                        name=f"👥 Участники ({len(vzp_data['defense_members'])}/{vzp_data['defense_target']})",
+                        value=defense_list,
+                        inline=False
+                    )
+                    embed.set_footer(text="Вперёд парни, принесите Дону победу!")
+                    await msg.edit(embed=embed, view=None)
                     vzp_data["defense_message_id"] = None
                 except:
                     pass
@@ -989,10 +1009,9 @@ async def complete_vzp():
     
     count = vzp_data["attack_target"]
     
-    # ФИНАЛЬНОЕ СООБЩЕНИЕ
     embed = discord.Embed(
         title=f"⚔️ Война за предприятия! {count} x {count}",
-        description="**Удачи парни, принесите Дону победу!**",
+        description="**Вперёд парни, принесите Дону победу!**",
         color=discord.Color.gold()
     )
     
@@ -1020,7 +1039,6 @@ async def complete_vzp():
     
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel:
-        # Отправляем финальное сообщение
         await channel.send(content="@everyone", embed=embed)
         print(f"✅ Финальное сообщение VZP отправлено")
 
