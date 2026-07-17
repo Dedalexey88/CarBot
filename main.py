@@ -915,12 +915,15 @@ async def update_vzp_messages():
         
         if len(vzp_data["attack_members"]) >= vzp_data["attack_target"]:
             vzp_data["attack_completed"] = True
-            try:
-                msg = await channel.fetch_message(vzp_data["attack_message_id"])
-                await msg.delete()
-                vzp_data["attack_message_id"] = None
-            except:
-                pass
+            # НЕ УДАЛЯЕМ СООБЩЕНИЕ, а просто убираем кнопки
+            if vzp_data["attack_message_id"]:
+                try:
+                    msg = await channel.fetch_message(vzp_data["attack_message_id"])
+                    # Редактируем сообщение, убирая кнопки
+                    await msg.edit(view=None)
+                    vzp_data["attack_message_id"] = None
+                except:
+                    pass
     
     if not vzp_data["defense_completed"] and vzp_data["defense_target"] > 0:
         defense_list = "\n".join([f"• {data['name']}" for data in vzp_data["defense_members"].values()]) if vzp_data["defense_members"] else "🔴 Нет участников"
@@ -954,12 +957,15 @@ async def update_vzp_messages():
         
         if len(vzp_data["defense_members"]) >= vzp_data["defense_target"]:
             vzp_data["defense_completed"] = True
-            try:
-                msg = await channel.fetch_message(vzp_data["defense_message_id"])
-                await msg.delete()
-                vzp_data["defense_message_id"] = None
-            except:
-                pass
+            # НЕ УДАЛЯЕМ СООБЩЕНИЕ, а просто убираем кнопки
+            if vzp_data["defense_message_id"]:
+                try:
+                    msg = await channel.fetch_message(vzp_data["defense_message_id"])
+                    # Редактируем сообщение, убирая кнопки
+                    await msg.edit(view=None)
+                    vzp_data["defense_message_id"] = None
+                except:
+                    pass
     
     if vzp_data["attack_completed"] and vzp_data["defense_completed"] and not vzp_data["is_completed"]:
         await complete_vzp()
@@ -983,7 +989,7 @@ async def complete_vzp():
     
     count = vzp_data["attack_target"]
     
-    # ПЕРВОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ
+    # ФИНАЛЬНОЕ СООБЩЕНИЕ
     embed = discord.Embed(
         title=f"⚔️ Война за предприятия! {count} x {count}",
         description="**Удачи парни, принесите Дону победу!**",
@@ -1014,65 +1020,9 @@ async def complete_vzp():
     
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel:
-        # Удаляем только старые сообщения с кнопками
-        messages_to_delete = []
-        
-        if vzp_data["attack_message_id"]:
-            try:
-                msg = await channel.fetch_message(vzp_data["attack_message_id"])
-                messages_to_delete.append(msg)
-                vzp_data["attack_message_id"] = None
-            except:
-                pass
-        
-        if vzp_data["defense_message_id"]:
-            try:
-                msg = await channel.fetch_message(vzp_data["defense_message_id"])
-                messages_to_delete.append(msg)
-                vzp_data["defense_message_id"] = None
-            except:
-                pass
-        
-        for msg in messages_to_delete:
-            try:
-                await msg.delete()
-                await asyncio.sleep(0.2)
-            except:
-                pass
-        
-        # ОТПРАВЛЯЕМ ПЕРВОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ
+        # Отправляем финальное сообщение
         await channel.send(content="@everyone", embed=embed)
-        print(f"✅ Первое финальное сообщение VZP отправлено")
-        
-        # ВТОРОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ (повтор списка)
-        embed2 = discord.Embed(
-            title=f"⚔️ Война за предприятия! {count} x {count}",
-            description="**Удачи парни, принесите Дону победу!**",
-            color=discord.Color.gold()
-        )
-        
-        embed2.add_field(
-            name=f"⚔️ Атака ({len(attack_list)}/{vzp_data['attack_target']})",
-            value=attack_text,
-            inline=True
-        )
-        
-        embed2.add_field(
-            name=f"🛡️ Защита ({len(defense_list)}/{vzp_data['defense_target']})",
-            value=defense_text,
-            inline=True
-        )
-        
-        embed2.add_field(
-            name=f"👥 Всего участников",
-            value=f"{len(attack_list) + len(defense_list)} человек",
-            inline=True
-        )
-        embed2.set_footer(text="Удачи! 🎯")
-        
-        # ОТПРАВЛЯЕМ ВТОРОЕ ФИНАЛЬНОЕ СООБЩЕНИЕ (дубль)
-        await channel.send(content="@everyone", embed=embed2)
-        print(f"✅ Второе финальное сообщение VZP отправлено")
+        print(f"✅ Финальное сообщение VZP отправлено")
 
 # --- Функция проверки времени для напоминаний ---
 def should_send_reminder():
