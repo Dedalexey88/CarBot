@@ -45,7 +45,10 @@ vzp_data = {
     "reminder_task": None,
     "attack_completed": False,
     "defense_completed": False,
-    "final_message_id": None
+    "final_message_id": None,
+    "reminders_enabled": True,  # Включены ли напоминания
+    "min_participants": 2,      # Минимальное количество участников
+    "max_participants": 50      # Максимальное количество участников
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -754,6 +757,14 @@ class VZPAtkJoinButton(Button):
             )
             return
         
+        # Проверяем лимиты
+        if len(vzp_data["attack_members"]) >= vzp_data["max_participants"]:
+            await interaction.response.send_message(
+                f"❌ Достигнут максимум участников в атаке ({vzp_data['max_participants']})!",
+                ephemeral=True
+            )
+            return
+        
         vzp_data["attack_members"][user_id] = {
             "name": interaction.user.display_name
         }
@@ -827,6 +838,14 @@ class VZPDefJoinButton(Button):
         if user_id in vzp_data["attack_members"]:
             await interaction.response.send_message(
                 "❌ Вы уже записаны в атаку! Нельзя быть в обеих командах.",
+                ephemeral=True
+            )
+            return
+        
+        # Проверяем лимиты
+        if len(vzp_data["defense_members"]) >= vzp_data["max_participants"]:
+            await interaction.response.send_message(
+                f"❌ Достигнут максимум участников в защите ({vzp_data['max_participants']})!",
                 ephemeral=True
             )
             return
@@ -1052,6 +1071,10 @@ def should_send_reminder():
 
 # --- Функция напоминания ---
 async def send_reminder():
+    # Проверяем, включены ли напоминания
+    if not vzp_data["reminders_enabled"]:
+        return
+    
     channel = client.get_channel(VZP_CHANNEL_ID)
     if channel is None:
         return
@@ -1342,6 +1365,21 @@ async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.
         )
         return
     
+    # Проверяем, что количество в пределах лимитов
+    if count < vzp_data["min_participants"]:
+        await interaction.response.send_message(
+            f"❌ Минимальное количество участников: {vzp_data['min_participants']}!",
+            ephemeral=True
+        )
+        return
+    
+    if count > vzp_data["max_participants"]:
+        await interaction.response.send_message(
+            f"❌ Максимальное количество участников: {vzp_data['max_participants']}!",
+            ephemeral=True
+        )
+        return
+    
     vzp_data["attack_target"] = count
     vzp_data["attack_members"] = {}
     vzp_data["attack_message_id"] = None
@@ -1383,6 +1421,21 @@ async def vzp_def_command(interaction: discord.Interaction, count: app_commands.
         )
         return
     
+    # Проверяем, что количество в пределах лимитов
+    if count < vzp_data["min_participants"]:
+        await interaction.response.send_message(
+            f"❌ Минимальное количество участников: {vzp_data['min_participants']}!",
+            ephemeral=True
+        )
+        return
+    
+    if count > vzp_data["max_participants"]:
+        await interaction.response.send_message(
+            f"❌ Максимальное количество участников: {vzp_data['max_participants']}!",
+            ephemeral=True
+        )
+        return
+    
     vzp_data["defense_target"] = count
     vzp_data["defense_members"] = {}
     vzp_data["defense_message_id"] = None
@@ -1395,6 +1448,150 @@ async def vzp_def_command(interaction: discord.Interaction, count: app_commands.
         f"✅ Сбор на защиту создан! Нужно **{count}** человек.",
         ephemeral=True
     )
+
+# --- КОМАНДА: /vzp_aoff ---
+@tree.command(
+    name="vzp_aoff", 
+    description="Отключить оповещения каждые 2 часа",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def vzp_aoff_command(interaction: discord.Interaction):
+    vzp_data["reminders_enabled"] = False
+    await interaction.response.send_message(
+        "🔕 **Оповещения отключены!**\n"
+        "Напоминания каждые 2 часа больше не будут отправляться.\n"
+        "Используйте `/vzp_aon` чтобы включить.",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /vzp_aon ---
+@tree.command(
+    name="vzp_aon", 
+    description="Включить оповещения каждые 2 часа",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def vzp_aon_command(interaction: discord.Interaction):
+    vzp_data["reminders_enabled"] = True
+    await interaction.response.send_message(
+        "🔔 **Оповещения включены!**\n"
+        "Напоминания каждые 2 часа будут отправляться в канал VZP.\n"
+        "Используйте `/vzp_aoff` чтобы отключить.",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /vzp_min ---
+@tree.command(
+    name="vzp_min", 
+    description="Установить минимальное количество участников",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(count="Минимальное количество участников (2-50)")
+async def vzp_min_command(interaction: discord.Interaction, count: app_commands.Range[int, 2, 50]):
+    old_min = vzp_data["min_participants"]
+    vzp_data["min_participants"] = count
+    
+    if count > vzp_data["max_participants"]:
+        await interaction.response.send_message(
+            f"⚠️ Минимальное значение ({count}) больше максимального ({vzp_data['max_participants']}).\n"
+            f"Установлено минимальное: {count}\n"
+            f"Рекомендую также увеличить максимальное через `/vzp_max`.",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.send_message(
+        f"✅ **Минимальное количество участников установлено: {count}**\n"
+        f"(было: {old_min})",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /vzp_max ---
+@tree.command(
+    name="vzp_max", 
+    description="Установить максимальное количество участников",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(count="Максимальное количество участников (2-50)")
+async def vzp_max_command(interaction: discord.Interaction, count: app_commands.Range[int, 2, 50]):
+    old_max = vzp_data["max_participants"]
+    vzp_data["max_participants"] = count
+    
+    if count < vzp_data["min_participants"]:
+        await interaction.response.send_message(
+            f"⚠️ Максимальное значение ({count}) меньше минимального ({vzp_data['min_participants']}).\n"
+            f"Установлено максимальное: {count}\n"
+            f"Рекомендую также уменьшить минимальное через `/vzp_min`.",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.send_message(
+        f"✅ **Максимальное количество участников установлено: {count}**\n"
+        f"(было: {old_max})",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /vzp_help ---
+@tree.command(
+    name="vzp_help", 
+    description="Показать все команды VZP с описанием",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def vzp_help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📖 Справка по командам VZP",
+        description="Все команды для управления сборами на ВСку",
+        color=discord.Color.blue()
+    )
+    
+    embed.add_field(
+        name="⚔️ /vzp_atk [count]",
+        value="Создать сбор на **атаку**\nПример: `/vzp_atk 6`",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🛡️ /vzp_def [count]",
+        value="Создать сбор на **защиту**\nПример: `/vzp_def 6`",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔔 /vzp_aon",
+        value="**Включить** оповещения каждые 2 часа",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔕 /vzp_aoff",
+        value="**Отключить** оповещения каждые 2 часа",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📉 /vzp_min [count]",
+        value="Установить **минимальное** количество участников\nТекущее: `{}`\nПример: `/vzp_min 2`".format(vzp_data["min_participants"]),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📈 /vzp_max [count]",
+        value="Установить **максимальное** количество участников\nТекущее: `{}`\nПример: `/vzp_max 10`".format(vzp_data["max_participants"]),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📖 /vzp_help",
+        value="Показать эту справку",
+        inline=False
+    )
+    
+    embed.set_footer(
+        text=f"Статус оповещений: {'🔔 Включены' if vzp_data['reminders_enabled'] else '🔕 Отключены'} | "
+        f"Лимиты: {vzp_data['min_participants']}-{vzp_data['max_participants']} человек"
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # --- КОМАНДА: /cars ---
 @tree.command(
