@@ -6,6 +6,7 @@ import datetime
 import asyncio
 import pytz
 import re
+import glob
 
 # --- ID из переменных окружения ---
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
@@ -46,10 +47,27 @@ vzp_data = {
     "attack_completed": False,
     "defense_completed": False,
     "final_message_id": None,
-    "reminders_enabled": True,  # Включены ли напоминания
-    "min_participants": 2,      # Минимальное количество участников
-    "max_participants": 50      # Максимальное количество участников
+    "reminders_enabled": True,
+    "min_participants": 2,
+    "max_participants": 50
 }
+
+# --- Получение списка карт из папки vzp_maps ---
+def get_vzp_maps():
+    """Возвращает список названий карт из папки vzp_maps."""
+    maps = []
+    # Ищем все файлы изображений в папке vzp_maps
+    image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp']
+    for ext in image_extensions:
+        pattern = os.path.join('vzp_maps', ext)
+        for file_path in glob.glob(pattern):
+            # Получаем имя файла без расширения
+            map_name = os.path.splitext(os.path.basename(file_path))[0]
+            maps.append({
+                'name': map_name,
+                'path': file_path
+            })
+    return maps
 
 # --- НАСТРОЙКА БОТА ---
 intents = discord.Intents.default()
@@ -724,6 +742,50 @@ class FreeButtonsView(View):
             await update_cars_channel()
         return callback
 
+# --- Класс для кнопок карт VZP ---
+class VZPMapButton(Button):
+    def __init__(self, map_name: str, file_path: str):
+        super().__init__(
+            label=map_name,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"vzp_map_{map_name}"
+        )
+        self.map_name = map_name
+        self.file_path = file_path
+    
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            # Открываем файл и отправляем как вложение
+            with open(self.file_path, 'rb') as f:
+                file = discord.File(f, filename=f"{self.map_name}.png")
+                
+                embed = discord.Embed(
+                    title=f"🗺️ Карта: {self.map_name}",
+                    color=discord.Color.blue()
+                )
+                embed.set_image(url=f"attachment://{self.map_name}.png")
+                embed.set_footer(text="VZP Карта")
+                
+                await interaction.response.send_message(
+                    content=f"🗺️ **Карта {self.map_name}**",
+                    embed=embed,
+                    file=file,
+                    ephemeral=True
+                )
+        except Exception as e:
+            print(f"❌ Ошибка при отправке карты {self.map_name}: {e}")
+            await interaction.response.send_message(
+                f"❌ Не удалось загрузить карту {self.map_name}",
+                ephemeral=True
+            )
+
+# --- Вью для кнопок карт VZP ---
+class VZPMapsView(View):
+    def __init__(self, maps: list):
+        super().__init__(timeout=None)
+        for map_data in maps:
+            self.add_item(VZPMapButton(map_data['name'], map_data['path']))
+
 # --- Кнопки для VZP ---
 class VZPAtkJoinButton(Button):
     def __init__(self):
@@ -757,7 +819,6 @@ class VZPAtkJoinButton(Button):
             )
             return
         
-        # Проверяем лимиты
         if len(vzp_data["attack_members"]) >= vzp_data["max_participants"]:
             await interaction.response.send_message(
                 f"❌ Достигнут максимум участников в атаке ({vzp_data['max_participants']})!",
@@ -842,7 +903,6 @@ class VZPDefJoinButton(Button):
             )
             return
         
-        # Проверяем лимиты
         if len(vzp_data["defense_members"]) >= vzp_data["max_participants"]:
             await interaction.response.send_message(
                 f"❌ Достигнут максимум участников в защите ({vzp_data['max_participants']})!",
@@ -1071,7 +1131,6 @@ def should_send_reminder():
 
 # --- Функция напоминания ---
 async def send_reminder():
-    # Проверяем, включены ли напоминания
     if not vzp_data["reminders_enabled"]:
         return
     
@@ -1365,7 +1424,6 @@ async def vzp_atk_command(interaction: discord.Interaction, count: app_commands.
         )
         return
     
-    # Проверяем, что количество в пределах лимитов
     if count < vzp_data["min_participants"]:
         await interaction.response.send_message(
             f"❌ Минимальное количество участников: {vzp_data['min_participants']}!",
@@ -1421,7 +1479,6 @@ async def vzp_def_command(interaction: discord.Interaction, count: app_commands.
         )
         return
     
-    # Проверяем, что количество в пределах лимитов
     if count < vzp_data["min_participants"]:
         await interaction.response.send_message(
             f"❌ Минимальное количество участников: {vzp_data['min_participants']}!",
@@ -1581,6 +1638,12 @@ async def vzp_help_command(interaction: discord.Interaction):
     )
     
     embed.add_field(
+        name="🗺️ /vzp_maps",
+        value="Показать все карты VZP",
+        inline=False
+    )
+    
+    embed.add_field(
         name="📖 /vzp_help",
         value="Показать эту справку",
         inline=False
@@ -1592,6 +1655,49 @@ async def vzp_help_command(interaction: discord.Interaction):
     )
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# --- КОМАНДА: /vzp_maps ---
+@tree.command(
+    name="vzp_maps", 
+    description="Показать все карты VZP",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def vzp_maps_command(interaction: discord.Interaction):
+    """Показывает кнопки с названиями карт из папки vzp_maps."""
+    
+    # Получаем список карт
+    maps = get_vzp_maps()
+    
+    if not maps:
+        await interaction.response.send_message(
+            "❌ **Карты не найдены!**\n"
+            "Убедитесь, что папка `vzp_maps` существует и содержит изображения карт.\n"
+            "Поддерживаются форматы: PNG, JPG, JPEG, GIF, WEBP",
+            ephemeral=True
+        )
+        return
+    
+    # Создаем embed с описанием
+    embed = discord.Embed(
+        title="🗺️ Карты VZP",
+        description=f"**Найдено карт: {len(maps)}**\n\n"
+        "Нажмите на кнопку с названием карты, чтобы увидеть её.",
+        color=discord.Color.blue()
+    )
+    
+    # Добавляем список карт в embed
+    map_names = "\n".join([f"• {m['name']}" for m in maps])
+    embed.add_field(
+        name="📋 Список карт:",
+        value=map_names if map_names else "Нет карт",
+        inline=False
+    )
+    embed.set_footer(text="Нажмите на кнопку ниже, чтобы посмотреть карту")
+    
+    # Создаем View с кнопками
+    view = VZPMapsView(maps)
+    
+    await interaction.response.send_message(embed=embed, view=view)
 
 # --- КОМАНДА: /cars ---
 @tree.command(
