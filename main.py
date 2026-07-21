@@ -56,10 +56,34 @@ vzp_data = {
 def get_vzp_maps():
     """Возвращает список названий карт из папки vzp_maps."""
     maps = []
-    # Ищем все файлы изображений в папке vzp_maps
+    
+    # Пути для поиска (на случай, если бот запускается из другой папки)
+    possible_paths = [
+        'vzp_maps',
+        './vzp_maps',
+        '../vzp_maps',
+        os.path.join(os.path.dirname(__file__), 'vzp_maps'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vzp_maps'),
+    ]
+    
+    found_path = None
+    for path in possible_paths:
+        if os.path.exists(path) and os.path.isdir(path):
+            found_path = path
+            break
+    
+    if not found_path:
+        print("❌ Папка vzp_maps не найдена!")
+        print(f"   Искали в: {possible_paths}")
+        print(f"   Текущая директория: {os.getcwd()}")
+        return []
+    
+    print(f"✅ Папка vzp_maps найдена: {found_path}")
+    
+    # Ищем все файлы изображений
     image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp']
     for ext in image_extensions:
-        pattern = os.path.join('vzp_maps', ext)
+        pattern = os.path.join(found_path, ext)
         for file_path in glob.glob(pattern):
             # Получаем имя файла без расширения
             map_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -67,6 +91,14 @@ def get_vzp_maps():
                 'name': map_name,
                 'path': file_path
             })
+    
+    print(f"✅ Найдено карт: {len(maps)}")
+    if maps:
+        for m in maps:
+            print(f"   - {m['name']}")
+    else:
+        print("   Нет файлов изображений в папке vzp_maps")
+    
     return maps
 
 # --- НАСТРОЙКА БОТА ---
@@ -146,7 +178,7 @@ def generate_car_list():
     
     return "\n".join(lines)
 
-# --- Функция для освобождения машины ---
+# --- Функция для освобождения машины (автоматически) ---
 async def free_car_auto(car_name: str):
     if car_name not in cars:
         return
@@ -168,6 +200,14 @@ async def free_car_auto(car_name: str):
     
     await send_log(f"⏰ **{user_name}** время вышло, машина **{car_name}** освобождена", embed=embed)
     await update_cars_channel()
+
+# --- Автоматический таймер освобождения ---
+async def auto_free_timer(car_name: str, minutes: int):
+    """Автоматически освобождает машину через указанное количество минут."""
+    await asyncio.sleep(minutes * 60)
+    
+    if car_name in cars and cars[car_name]["status"] == "Занята":
+        await free_car_auto(car_name)
 
 # --- Обновление канала с машинами ---
 async def update_cars_channel():
@@ -194,12 +234,6 @@ async def update_cars_channel():
         )
         await cleanup_channel(CAR_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
 
-# --- Автоматический таймер ---
-async def auto_free_timer(car_name: str, minutes: int):
-    await asyncio.sleep(minutes * 60)
-    if car_name in cars and cars[car_name]["status"] == "Занята":
-        await free_car_auto(car_name)
-
 # --- Модальное окно для ручного ввода времени ---
 class TimeInputModal(Modal):
     def __init__(self, car_name: str):
@@ -218,9 +252,17 @@ class TimeInputModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             minutes = int(self.time_input.value)
+            
             if minutes < 1 or minutes > 120:
                 await interaction.response.send_message(
                     "❌ Время должно быть от 1 до 120 минут!",
+                    ephemeral=True
+                )
+                return
+            
+            if self.car_name not in cars:
+                await interaction.response.send_message(
+                    f"❌ Машина '{self.car_name}' не найдена!",
                     ephemeral=True
                 )
                 return
@@ -289,9 +331,23 @@ class TimeButtonsView(View):
         await interaction.response.send_modal(TimeInputModal(self.car_name))
     
     async def take_car(self, interaction: discord.Interaction, minutes: int):
+        if self.car_name not in cars:
+            await interaction.response.send_message(
+                f"❌ Машина '{self.car_name}' не найдена!",
+                ephemeral=True
+            )
+            return
+        
         if cars[self.car_name]["status"] == "Занята":
             await interaction.response.send_message(
                 f"❌ Машина '{self.car_name}' уже занята!",
+                ephemeral=True
+            )
+            return
+        
+        if minutes < 1 or minutes > 120:
+            await interaction.response.send_message(
+                "❌ Время должно быть от 1 до 120 минут!",
                 ephemeral=True
             )
             return
@@ -755,7 +811,6 @@ class VZPMapButton(Button):
     
     async def callback(self, interaction: discord.Interaction):
         try:
-            # Открываем файл и отправляем как вложение
             with open(self.file_path, 'rb') as f:
                 file = discord.File(f, filename=f"{self.map_name}.png")
                 
@@ -1265,6 +1320,18 @@ async def on_message(message: discord.Message):
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     
+    # Проверяем наличие папки vzp_maps
+    print(f"📁 Текущая директория: {os.getcwd()}")
+    
+    if os.path.exists('vzp_maps'):
+        print(f"✅ Папка vzp_maps существует!")
+        try:
+            print(f"📁 Содержимое vzp_maps: {os.listdir('vzp_maps')}")
+        except:
+            print("⚠️ Не удалось прочитать содержимое vzp_maps")
+    else:
+        print(f"❌ Папка vzp_maps НЕ НАЙДЕНА!")
+    
     for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин"), (VZP_CHANNEL_ID, "VZP")]:
         if channel_id:
             channel = client.get_channel(channel_id)
@@ -1665,7 +1732,6 @@ async def vzp_help_command(interaction: discord.Interaction):
 async def vzp_maps_command(interaction: discord.Interaction):
     """Показывает кнопки с названиями карт из папки vzp_maps."""
     
-    # Получаем список карт
     maps = get_vzp_maps()
     
     if not maps:
@@ -1677,7 +1743,6 @@ async def vzp_maps_command(interaction: discord.Interaction):
         )
         return
     
-    # Создаем embed с описанием
     embed = discord.Embed(
         title="🗺️ Карты VZP",
         description=f"**Найдено карт: {len(maps)}**\n\n"
@@ -1685,7 +1750,6 @@ async def vzp_maps_command(interaction: discord.Interaction):
         color=discord.Color.blue()
     )
     
-    # Добавляем список карт в embed
     map_names = "\n".join([f"• {m['name']}" for m in maps])
     embed.add_field(
         name="📋 Список карт:",
@@ -1694,7 +1758,6 @@ async def vzp_maps_command(interaction: discord.Interaction):
     )
     embed.set_footer(text="Нажмите на кнопку ниже, чтобы посмотреть карту")
     
-    # Создаем View с кнопками
     view = VZPMapsView(maps)
     
     await interaction.response.send_message(embed=embed, view=view)
