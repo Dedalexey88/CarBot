@@ -27,6 +27,8 @@ cars = {
     "Benefactor G-series 63 ASG 6x6 LY699IEB": {"status": "Свободна", "user": None, "end_time": None},
     "Vapid Bronzo Predator 2022 GC643UFN": {"status": "Свободна", "user": None, "end_time": None},
     "Karin Thunder 2021 SY108SFL": {"status": "Свободна", "user": None, "end_time": None},
+    "Ubermacht 760I J70 2022": {"status": "Свободна", "user": None, "end_time": None},
+    
 }
 
 # --- Данные для контрактов ---
