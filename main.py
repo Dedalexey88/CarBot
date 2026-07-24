@@ -7,6 +7,7 @@ import asyncio
 import pytz
 import re
 import glob
+import json
 
 # --- ID из переменных окружения ---
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
@@ -18,18 +19,58 @@ LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 # --- Московский часовой пояс ---
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 
-# --- Данные о машинах (7 штук) ---
-cars = {
-    "Karin Rebel TS701VCA": {"status": "Свободна", "user": None, "end_time": None},
-    "Benefactor Ml63 2010 ST530MFA": {"status": "Свободна", "user": None, "end_time": None},
-    "Annis Jook Nizmo RS 2013 JZ738CKY": {"status": "Свободна", "user": None, "end_time": None},
-    "Emperor IC-F 2012 BU363YHX": {"status": "Свободна", "user": None, "end_time": None},
-    "Benefactor G-series 63 ASG 6x6 LY699IEB": {"status": "Свободна", "user": None, "end_time": None},
-    "Vapid Bronzo Predator 2022 GC643UFN": {"status": "Свободна", "user": None, "end_time": None},
-    "Karin Thunder 2021 SY108SFL": {"status": "Свободна", "user": None, "end_time": None},
-    "Ubermacht 760I J70 2022": {"status": "Свободна", "user": None, "end_time": None},
-    
-}
+# --- Путь к файлу с данными о машинах ---
+CARS_FILE = 'cars_data.json'
+
+# --- Функция для загрузки машин из файла ---
+def load_cars():
+    """Загружает список машин из JSON файла."""
+    try:
+        with open(CARS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"❌ Файл {CARS_FILE} не найден! Создаю новый...")
+        # Создаем файл с дефолтными машинами
+        default_cars = {
+            "Karin Rebel TS701VCA": {"status": "Свободна", "user": None, "end_time": None},
+            "Benefactor Ml63 2010 ST530MFA": {"status": "Свободна", "user": None, "end_time": None},
+            "Annis Jook Nizmo RS 2013 JZ738CKY": {"status": "Свободна", "user": None, "end_time": None},
+            "Emperor IC-F 2012 BU363YHX": {"status": "Свободна", "user": None, "end_time": None},
+            "Benefactor G-series 63 ASG 6x6 LY699IEB": {"status": "Свободна", "user": None, "end_time": None},
+            "Vapid Bronzo Predator 2022 GC643UFN": {"status": "Свободна", "user": None, "end_time": None},
+            "Karin Thunder 2021 SY108SFL": {"status": "Свободна", "user": None, "end_time": None},
+            "Ubermacht 760I J70 2022": {"status": "Свободна", "user": None, "end_time": None}
+        }
+        save_cars(default_cars)
+        return default_cars
+    except json.JSONDecodeError:
+        print(f"❌ Ошибка чтения {CARS_FILE}! Создаю новый...")
+        default_cars = {
+            "Karin Rebel TS701VCA": {"status": "Свободна", "user": None, "end_time": None},
+            "Benefactor Ml63 2010 ST530MFA": {"status": "Свободна", "user": None, "end_time": None},
+            "Annis Jook Nizmo RS 2013 JZ738CKY": {"status": "Свободна", "user": None, "end_time": None},
+            "Emperor IC-F 2012 BU363YHX": {"status": "Свободна", "user": None, "end_time": None},
+            "Benefactor G-series 63 ASG 6x6 LY699IEB": {"status": "Свободна", "user": None, "end_time": None},
+            "Vapid Bronzo Predator 2022 GC643UFN": {"status": "Свободна", "user": None, "end_time": None},
+            "Karin Thunder 2021 SY108SFL": {"status": "Свободна", "user": None, "end_time": None},
+            "Ubermacht 760I J70 2022": {"status": "Свободна", "user": None, "end_time": None}
+        }
+        save_cars(default_cars)
+        return default_cars
+
+# --- Функция для сохранения машин в файл ---
+def save_cars(cars_data):
+    """Сохраняет список машин в JSON файл."""
+    try:
+        with open(CARS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cars_data, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка сохранения {CARS_FILE}: {e}")
+        return False
+
+# --- Загружаем данные о машинах ---
+cars = load_cars()
 
 # --- Данные для контрактов ---
 contracts = {}
@@ -75,8 +116,6 @@ def get_vzp_maps():
     
     if not found_path:
         print("❌ Папка vzp_maps не найдена!")
-        print(f"   Искали в: {possible_paths}")
-        print(f"   Текущая директория: {os.getcwd()}")
         return []
     
     print(f"✅ Папка vzp_maps найдена: {found_path}")
@@ -92,12 +131,6 @@ def get_vzp_maps():
             })
     
     print(f"✅ Найдено карт: {len(maps)}")
-    if maps:
-        for m in maps:
-            print(f"   - {m['name']}")
-    else:
-        print("   Нет файлов изображений в папке vzp_maps")
-    
     return maps
 
 # --- НАСТРОЙКА БОТА ---
@@ -189,6 +222,9 @@ async def free_car_auto(car_name: str):
     cars[car_name]["user"] = None
     cars[car_name]["end_time"] = None
     
+    # Сохраняем изменения в файл
+    save_cars(cars)
+    
     embed = discord.Embed(
         title="⏰ Машина автоматически освобождена",
         description=f"**{car_name}**",
@@ -278,6 +314,9 @@ class TimeInputModal(Modal):
             cars[self.car_name]["user"] = user_name
             cars[self.car_name]["end_time"] = end_time
             
+            # Сохраняем изменения в файл
+            save_cars(cars)
+            
             asyncio.create_task(auto_free_timer(self.car_name, minutes))
             
             await interaction.response.send_message(
@@ -356,6 +395,9 @@ class TimeButtonsView(View):
         cars[self.car_name]["user"] = user_name
         cars[self.car_name]["end_time"] = end_time
         
+        # Сохраняем изменения в файл
+        save_cars(cars)
+        
         asyncio.create_task(auto_free_timer(self.car_name, minutes))
         
         await interaction.response.send_message(
@@ -397,6 +439,9 @@ class AddCarModal(Modal):
             return
         
         cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
+        
+        # Сохраняем в файл
+        save_cars(cars)
         
         await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
         
@@ -455,6 +500,9 @@ class RenameCarModal(Modal):
         
         car_data = cars.pop(self.old_name)
         cars[new_name] = car_data
+        
+        # Сохраняем в файл
+        save_cars(cars)
         
         await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
         
@@ -829,12 +877,12 @@ async def finish_contract(contract_id: str):
     
     del contracts[contract_id]
 
-# --- Кнопки машин ---
+# --- Кнопки машин (динамически создаются из файла) ---
 class CarButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
         car_list = list(cars.keys())
-        for i, car_name in enumerate(car_list[:7]):
+        for i, car_name in enumerate(car_list):
             label = car_name[:25] + "..." if len(car_name) > 25 else car_name
             button = Button(label=label, style=discord.ButtonStyle.success, custom_id=f"car_{i}")
             button.callback = self.create_callback(car_name)
@@ -855,12 +903,12 @@ class CarButtonsView(View):
             )
         return callback
 
-# --- Кнопки освобождения ---
+# --- Кнопки освобождения (динамически создаются из файла) ---
 class FreeButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
         car_list = list(cars.keys())
-        for i, car_name in enumerate(car_list[:7]):
+        for i, car_name in enumerate(car_list):
             label = car_name[:25] + "..." if len(car_name) > 25 else car_name
             button = Button(label=f"🗑️ {label}", style=discord.ButtonStyle.danger, custom_id=f"free_{i}")
             button.callback = self.create_callback(car_name)
@@ -886,6 +934,9 @@ class FreeButtonsView(View):
             cars[car_name]["status"] = "Свободна"
             cars[car_name]["user"] = None
             cars[car_name]["end_time"] = None
+            
+            # Сохраняем изменения в файл
+            save_cars(cars)
             
             await interaction.response.send_message(
                 f"✅ Машина '{car_name}' освобождена!",
@@ -1418,6 +1469,7 @@ async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     
     print(f"📁 Текущая директория: {os.getcwd()}")
+    print(f"📁 Загружено машин: {len(cars)}")
     
     if os.path.exists('vzp_maps'):
         print(f"✅ Папка vzp_maps существует!")
@@ -1876,16 +1928,47 @@ async def cars_command(interaction: discord.Interaction):
 # --- КОМАНДА: /add_car ---
 @tree.command(
     name="add_car", 
-    description="Добавить новую машину",
+    description="Добавить новую машину (записывается в файл)",
     guild=discord.Object(id=GUILD_ID)
 )
-async def add_car_command(interaction: discord.Interaction):
-    await interaction.response.send_modal(AddCarModal())
+@app_commands.describe(car_name="Название новой машины")
+async def add_car_command(interaction: discord.Interaction, car_name: str):
+    """Добавляет новую машину в список и сохраняет в файл."""
+    
+    car_name = car_name.strip()
+    
+    if not car_name:
+        await interaction.response.send_message(
+            "❌ Название машины не может быть пустым!",
+            ephemeral=True
+        )
+        return
+    
+    if car_name in cars:
+        await interaction.response.send_message(
+            f"❌ Машина '{car_name}' уже существует!",
+            ephemeral=True
+        )
+        return
+    
+    cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
+    
+    # Сохраняем в файл
+    save_cars(cars)
+    
+    await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
+    
+    await interaction.response.send_message(
+        f"✅ Машина '{car_name}' успешно добавлена и сохранена в файл!",
+        ephemeral=False
+    )
+    
+    await update_cars_channel()
 
 # --- КОМАНДА: /remove_car ---
 @tree.command(
     name="remove_car", 
-    description="Удалить машину",
+    description="Удалить машину из списка и файла",
     guild=discord.Object(id=GUILD_ID)
 )
 @app_commands.describe(car_name="Название машины для удаления")
@@ -1903,36 +1986,75 @@ async def remove_car_command(interaction: discord.Interaction, car_name: str):
         )
         return
     del cars[car_name]
+    
+    # Сохраняем в файл
+    save_cars(cars)
+    
     await send_log(f"❌ **{interaction.user.display_name}** удалил машину: **{car_name}**")
+    
     await interaction.response.send_message(
-        f"✅ Машина '{car_name}' успешно удалена!",
+        f"✅ Машина '{car_name}' успешно удалена из списка и файла!",
         ephemeral=False
     )
+    
     await update_cars_channel()
 
 # --- КОМАНДА: /rename_car ---
 @tree.command(
     name="rename_car", 
-    description="Переименовать машину",
+    description="Переименовать машину (сохраняется в файл)",
     guild=discord.Object(id=GUILD_ID)
 )
-@app_commands.describe(car_name="Название машины для переименования")
-async def rename_car_command(interaction: discord.Interaction, car_name: str):
-    if car_name not in cars:
+@app_commands.describe(
+    old_name="Текущее название машины",
+    new_name="Новое название машины"
+)
+async def rename_car_command(interaction: discord.Interaction, old_name: str, new_name: str):
+    old_name = old_name.strip()
+    new_name = new_name.strip()
+    
+    if not old_name or not new_name:
         await interaction.response.send_message(
-            f"❌ Машина '{car_name}' не найдена!",
+            "❌ Название не может быть пустым!",
             ephemeral=True
         )
         return
     
-    if cars[car_name]["status"] == "Занята":
+    if old_name not in cars:
         await interaction.response.send_message(
-            f"❌ Нельзя переименовать машину '{car_name}' — она занята!",
+            f"❌ Машина '{old_name}' не найдена!",
             ephemeral=True
         )
         return
     
-    await interaction.response.send_modal(RenameCarModal(car_name))
+    if cars[old_name]["status"] == "Занята":
+        await interaction.response.send_message(
+            f"❌ Нельзя переименовать машину '{old_name}' — она занята!",
+            ephemeral=True
+        )
+        return
+    
+    if new_name in cars:
+        await interaction.response.send_message(
+            f"❌ Машина '{new_name}' уже существует!",
+            ephemeral=True
+        )
+        return
+    
+    car_data = cars.pop(old_name)
+    cars[new_name] = car_data
+    
+    # Сохраняем в файл
+    save_cars(cars)
+    
+    await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{old_name}** → **{new_name}**")
+    
+    await interaction.response.send_message(
+        f"✅ Машина '{old_name}' переименована в '{new_name}' и сохранена в файл!",
+        ephemeral=False
+    )
+    
+    await update_cars_channel()
 
 # --- КОМАНДА: /list_cars ---
 @tree.command(
@@ -1976,7 +2098,12 @@ async def take_command(
     cars[car_name]["status"] = "Занята"
     cars[car_name]["user"] = user_name
     cars[car_name]["end_time"] = end_time
+    
+    # Сохраняем в файл
+    save_cars(cars)
+    
     asyncio.create_task(auto_free_timer(car_name, minutes))
+    
     await interaction.response.send_message(
         f"✅ Машина '{car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
         ephemeral=False
@@ -2013,6 +2140,10 @@ async def free_command(interaction: discord.Interaction, car_name: str):
     cars[car_name]["status"] = "Свободна"
     cars[car_name]["user"] = None
     cars[car_name]["end_time"] = None
+    
+    # Сохраняем в файл
+    save_cars(cars)
+    
     await interaction.response.send_message(
         f"✅ Машина '{car_name}' освобождена!",
         ephemeral=False
