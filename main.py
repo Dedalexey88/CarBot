@@ -57,7 +57,6 @@ def get_vzp_maps():
     """Возвращает список названий карт из папки vzp_maps."""
     maps = []
     
-    # Пути для поиска (на случай, если бот запускается из другой папки)
     possible_paths = [
         'vzp_maps',
         './vzp_maps',
@@ -80,12 +79,10 @@ def get_vzp_maps():
     
     print(f"✅ Папка vzp_maps найдена: {found_path}")
     
-    # Ищем все файлы изображений
     image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp']
     for ext in image_extensions:
         pattern = os.path.join(found_path, ext)
         for file_path in glob.glob(pattern):
-            # Получаем имя файла без расширения
             map_name = os.path.splitext(os.path.basename(file_path))[0]
             maps.append({
                 'name': map_name,
@@ -203,9 +200,7 @@ async def free_car_auto(car_name: str):
 
 # --- Автоматический таймер освобождения ---
 async def auto_free_timer(car_name: str, minutes: int):
-    """Автоматически освобождает машину через указанное количество минут."""
     await asyncio.sleep(minutes * 60)
-    
     if car_name in cars and cars[car_name]["status"] == "Занята":
         await free_car_auto(car_name)
 
@@ -363,6 +358,106 @@ class TimeButtonsView(View):
         
         await interaction.response.send_message(
             f"✅ Машина '{self.car_name}' взята пользователем **{user_name}** на **{minutes}** минут!",
+            ephemeral=False
+        )
+        
+        await update_cars_channel()
+
+# --- Модальное окно для добавления машины ---
+class AddCarModal(Modal):
+    def __init__(self):
+        super().__init__(title="Добавить машину")
+        
+        self.car_name_input = TextInput(
+            label="Название машины",
+            placeholder="Введите название новой машины",
+            min_length=1,
+            max_length=100,
+            required=True
+        )
+        self.add_item(self.car_name_input)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        car_name = self.car_name_input.value.strip()
+        
+        if not car_name:
+            await interaction.response.send_message(
+                "❌ Название машины не может быть пустым!",
+                ephemeral=True
+            )
+            return
+        
+        if car_name in cars:
+            await interaction.response.send_message(
+                f"❌ Машина '{car_name}' уже существует!",
+                ephemeral=True
+            )
+            return
+        
+        cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
+        
+        await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
+        
+        await interaction.response.send_message(
+            f"✅ Машина '{car_name}' успешно добавлена!",
+            ephemeral=False
+        )
+        
+        await update_cars_channel()
+
+# --- Модальное окно для переименования машины ---
+class RenameCarModal(Modal):
+    def __init__(self, old_name: str):
+        super().__init__(title=f"Переименовать: {old_name}")
+        self.old_name = old_name
+        
+        self.new_name_input = TextInput(
+            label="Новое название",
+            placeholder="Введите новое название машины",
+            min_length=1,
+            max_length=100,
+            required=True
+        )
+        self.add_item(self.new_name_input)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        new_name = self.new_name_input.value.strip()
+        
+        if not new_name:
+            await interaction.response.send_message(
+                "❌ Название машины не может быть пустым!",
+                ephemeral=True
+            )
+            return
+        
+        if new_name in cars:
+            await interaction.response.send_message(
+                f"❌ Машина '{new_name}' уже существует!",
+                ephemeral=True
+            )
+            return
+        
+        if self.old_name not in cars:
+            await interaction.response.send_message(
+                f"❌ Машина '{self.old_name}' не найдена!",
+                ephemeral=True
+            )
+            return
+        
+        if cars[self.old_name]["status"] == "Занята":
+            await interaction.response.send_message(
+                f"❌ Нельзя переименовать машину '{self.old_name}' — она занята!",
+                ephemeral=True
+            )
+            return
+        
+        car_data = cars.pop(self.old_name)
+        cars[new_name] = car_data
+        
+        await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
+        
+        await interaction.response.send_message(
+            f"✅ Машина '{self.old_name}' переименована в '{new_name}'!",
             ephemeral=False
         )
         
@@ -1320,7 +1415,6 @@ async def on_message(message: discord.Message):
 async def on_ready():
     print(f'✅ Бот {client.user} готов к работе!')
     
-    # Проверяем наличие папки vzp_maps
     print(f"📁 Текущая директория: {os.getcwd()}")
     
     if os.path.exists('vzp_maps'):
@@ -1730,8 +1824,6 @@ async def vzp_help_command(interaction: discord.Interaction):
     guild=discord.Object(id=GUILD_ID)
 )
 async def vzp_maps_command(interaction: discord.Interaction):
-    """Показывает кнопки с названиями карт из папки vzp_maps."""
-    
     maps = get_vzp_maps()
     
     if not maps:
@@ -1786,34 +1878,6 @@ async def cars_command(interaction: discord.Interaction):
     guild=discord.Object(id=GUILD_ID)
 )
 async def add_car_command(interaction: discord.Interaction):
-    class AddCarModal(Modal):
-        def __init__(self):
-            super().__init__(title="Добавить машину")
-            self.car_name_input = TextInput(
-                label="Название машины",
-                placeholder="Введите название новой машины",
-                min_length=1,
-                max_length=100,
-                required=True
-            )
-            self.add_item(self.car_name_input)
-        
-        async def on_submit(self, interaction: discord.Interaction):
-            car_name = self.car_name_input.value
-            if car_name in cars:
-                await interaction.response.send_message(
-                    f"❌ Машина '{car_name}' уже существует!",
-                    ephemeral=True
-                )
-                return
-            cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
-            await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
-            await interaction.response.send_message(
-                f"✅ Машина '{car_name}' успешно добавлена!",
-                ephemeral=False
-            )
-            await update_cars_channel()
-    
     await interaction.response.send_modal(AddCarModal())
 
 # --- КОМАНДА: /remove_car ---
@@ -1859,35 +1923,12 @@ async def rename_car_command(interaction: discord.Interaction, car_name: str):
         )
         return
     
-    class RenameCarModal(Modal):
-        def __init__(self, old_name: str):
-            super().__init__(title=f"Переименовать: {old_name}")
-            self.old_name = old_name
-            self.new_name_input = TextInput(
-                label="Новое название",
-                placeholder="Введите новое название машины",
-                min_length=1,
-                max_length=100,
-                required=True
-            )
-            self.add_item(self.new_name_input)
-        
-        async def on_submit(self, interaction: discord.Interaction):
-            new_name = self.new_name_input.value
-            if new_name in cars:
-                await interaction.response.send_message(
-                    f"❌ Машина '{new_name}' уже существует!",
-                    ephemeral=True
-                )
-                return
-            car_data = cars.pop(self.old_name)
-            cars[new_name] = car_data
-            await send_log(f"✏️ **{interaction.user.display_name}** переименовал машину: **{self.old_name}** → **{new_name}**")
-            await interaction.response.send_message(
-                f"✅ Машина '{self.old_name}' переименована в '{new_name}'!",
-                ephemeral=False
-            )
-            await update_cars_channel()
+    if cars[car_name]["status"] == "Занята":
+        await interaction.response.send_message(
+            f"❌ Нельзя переименовать машину '{car_name}' — она занята!",
+            ephemeral=True
+        )
+        return
     
     await interaction.response.send_modal(RenameCarModal(car_name))
 
