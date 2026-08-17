@@ -13,8 +13,15 @@ import json
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
 CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
 CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
-VZP_CHANNEL_ID = 1523341052680081408  # ID канала для VZP
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+
+# --- ID каналов для VZP (можно несколько) ---
+VZP_CHANNELS = [
+    1523341052680081408,  # старый канал
+    1538899458157318165,  # новый канал
+    1523341229289640157   # дополнительный канал
+]
+VZP_CHANNEL_ID = VZP_CHANNELS[0]  # основной канал для хранения данных
 
 # --- Московский часовой пояс ---
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
@@ -670,10 +677,14 @@ class VZPRejectButton(Button):
 
 # --- Обновление сообщения VZP ---
 async def update_vzp_message():
-    channel = client.get_channel(VZP_CHANNEL_ID)
+    # Ищем канал, где было отправлено сообщение
+    channel = client.get_channel(vzp_data["channel_id"])
     if channel is None:
-        print(f"❌ Канал VZP не найден!")
-        return
+        # Если канал не найден, используем первый из списка
+        channel = client.get_channel(VZP_CHANNELS[0])
+        if channel is None:
+            print(f"❌ Канал VZP не найден!")
+            return
     
     # Формируем список участников
     member_list = []
@@ -756,6 +767,7 @@ async def update_vzp_message():
     
     msg = await channel.send(content="@everyone", embed=embed, view=view)
     vzp_data["message_id"] = msg.id
+    vzp_data["channel_id"] = channel.id
 
 # --- Таймер VZP ---
 async def vzp_timer():
@@ -768,7 +780,7 @@ async def vzp_timer():
             return
         
         # Отправляем уведомление
-        channel = client.get_channel(VZP_CHANNEL_ID)
+        channel = client.get_channel(vzp_data["channel_id"])
         if channel:
             remaining = 600 - (datetime.datetime.now() - vzp_data["start_time"]).total_seconds()
             minutes = int(remaining // 60)
@@ -796,7 +808,7 @@ async def finish_vzp(success: bool):
     
     vzp_data["is_completed"] = True
     
-    channel = client.get_channel(VZP_CHANNEL_ID)
+    channel = client.get_channel(vzp_data["channel_id"])
     if channel is None:
         return
     
@@ -1430,16 +1442,15 @@ async def on_ready():
     print(f"📁 Текущая директория: {os.getcwd()}")
     print(f"📁 Загружено машин: {len(cars)}")
     
-    if os.path.exists('vzp_maps'):
-        print(f"✅ Папка vzp_maps существует!")
-        try:
-            print(f"📁 Содержимое vzp_maps: {os.listdir('vzp_maps')}")
-        except:
-            print("⚠️ Не удалось прочитать содержимое vzp_maps")
-    else:
-        print(f"❌ Папка vzp_maps НЕ НАЙДЕНА!")
+    # Проверяем каналы VZP
+    for channel_id in VZP_CHANNELS:
+        channel = client.get_channel(channel_id)
+        if channel:
+            print(f'✅ Канал VZP найден: {channel.name} (ID: {channel.id})')
+        else:
+            print(f'❌ КАНАЛ VZP (ID: {channel_id}) НЕ НАЙДЕН!')
     
-    for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин"), (VZP_CHANNEL_ID, "VZP")]:
+    for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин")]:
         if channel_id:
             channel = client.get_channel(channel_id)
             if channel:
@@ -1567,9 +1578,11 @@ async def contr_command(interaction: discord.Interaction, name: str):
 async def vzp_command(interaction: discord.Interaction):
     """Открывает модальное окно для создания сбора на ВЗП."""
     
-    if interaction.channel_id != VZP_CHANNEL_ID:
+    # Проверяем, что команда используется в одном из разрешенных каналов
+    if interaction.channel_id not in VZP_CHANNELS:
+        channels_mentions = " ".join([f"<#{ch_id}>" for ch_id in VZP_CHANNELS])
         await interaction.response.send_message(
-            f"❌ Эта команда доступна только в канале <#{VZP_CHANNEL_ID}>!",
+            f"❌ Эта команда доступна только в каналах: {channels_mentions}!",
             ephemeral=True
         )
         return
@@ -1580,6 +1593,9 @@ async def vzp_command(interaction: discord.Interaction):
             ephemeral=True
         )
         return
+    
+    # Устанавливаем текущий канал как канал для сбора
+    vzp_data["channel_id"] = interaction.channel_id
     
     await interaction.response.send_modal(VZPModal())
 
@@ -1618,9 +1634,6 @@ async def vzp_maps_command(interaction: discord.Interaction):
     view = VZPMapsView(maps)
     
     await interaction.response.send_message(embed=embed, view=view)
-
-# --- ОСТАЛЬНЫЕ КОМАНДЫ (cars, add_car, remove_car, rename_car, list_cars, take, free) ---
-# ... (они остаются без изменений, как в предыдущей версии)
 
 # --- КОМАНДА: /cars ---
 @tree.command(
