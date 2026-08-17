@@ -88,7 +88,9 @@ vzp_data = {
     "reminder_task": None,
     "text": "Сбор реакций на ВЗП!",
     "author_id": None,
-    "start_time": None
+    "start_time": None,
+    "vzp_type": None,
+    "vzp_type_label": None
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -438,19 +440,10 @@ class AddCarModal(Modal):
         
         await update_cars_channel()
 
-# --- Модальное окно для VZP ---
-class VZPModal(Modal):
+# --- Модальное окно для VZP (текст и количество) ---
+class VZPTextModal(Modal):
     def __init__(self):
         super().__init__(title="Создать сбор на ВЗП")
-        
-        self.vzp_type = Select(
-            placeholder="Выберите тип сбора",
-            options=[
-                discord.SelectOption(label="⚔️ Атака", value="attack", description="Скрещенные мечи"),
-                discord.SelectOption(label="🛡️ Защита", value="defense", description="Щит"),
-            ]
-        )
-        self.add_item(self.vzp_type)
         
         self.vzp_text = TextInput(
             label="Текст сбора",
@@ -486,7 +479,13 @@ class VZPModal(Modal):
             )
             return
         
-        # Сохраняем данные
+        if vzp_data["vzp_type"] is None:
+            await interaction.response.send_message(
+                "❌ Сначала выберите тип сбора (Атака/Защита)!",
+                ephemeral=True
+            )
+            return
+        
         vzp_data["members"] = {}
         vzp_data["target_count"] = count
         vzp_data["is_completed"] = False
@@ -495,9 +494,12 @@ class VZPModal(Modal):
         vzp_data["start_time"] = datetime.datetime.now()
         vzp_data["last_reminder_time"] = None
         
+        type_emoji = "⚔️" if vzp_data["vzp_type"] == "attack" else "🛡️"
+        type_name = "Атака" if vzp_data["vzp_type"] == "attack" else "Защита"
+        
         await interaction.response.send_message(
             f"✅ Сбор на ВЗП создан!\n"
-            f"**Тип:** {'⚔️ Атака' if self.vzp_type.values[0] == 'attack' else '🛡️ Защита'}\n"
+            f"**Тип:** {type_emoji} {type_name}\n"
             f"**Текст:** {self.vzp_text.value}\n"
             f"**Максимум участников:** {count}",
             ephemeral=True
@@ -508,6 +510,23 @@ class VZPModal(Modal):
         # Запускаем таймер
         task = asyncio.create_task(vzp_timer())
         vzp_data["reminder_task"] = task
+
+# --- Кнопки выбора типа ВЗП ---
+class VZPTypeView(View):
+    def __init__(self):
+        super().__init__(timeout=120)
+    
+    @discord.ui.button(label="⚔️ Атака", style=discord.ButtonStyle.danger, custom_id="vzp_type_attack")
+    async def type_attack(self, interaction: discord.Interaction, button: Button):
+        vzp_data["vzp_type"] = "attack"
+        vzp_data["vzp_type_label"] = "⚔️ Атака"
+        await interaction.response.send_modal(VZPTextModal())
+    
+    @discord.ui.button(label="🛡️ Защита", style=discord.ButtonStyle.primary, custom_id="vzp_type_defense")
+    async def type_defense(self, interaction: discord.Interaction, button: Button):
+        vzp_data["vzp_type"] = "defense"
+        vzp_data["vzp_type_label"] = "🛡️ Защита"
+        await interaction.response.send_modal(VZPTextModal())
 
 # --- Кнопка "Записаться на ВЗП" ---
 class VZPJoinButton(Button):
@@ -601,7 +620,6 @@ class VZPApproveButton(Button):
         self.user_name = user_name
     
     async def callback(self, interaction: discord.Interaction):
-        # Проверяем, что команду запустил автор
         if interaction.user.id != vzp_data["author_id"]:
             await interaction.response.send_message(
                 "❌ Только создатель сбора может подтверждать участников!",
@@ -644,7 +662,6 @@ class VZPRejectButton(Button):
         self.user_name = user_name
     
     async def callback(self, interaction: discord.Interaction):
-        # Проверяем, что команду запустил автор
         if interaction.user.id != vzp_data["author_id"]:
             await interaction.response.send_message(
                 "❌ Только создатель сбора может отклонять участников!",
@@ -677,19 +694,15 @@ class VZPRejectButton(Button):
 
 # --- Обновление сообщения VZP ---
 async def update_vzp_message():
-    # Ищем канал, где было отправлено сообщение
     channel = client.get_channel(vzp_data["channel_id"])
     if channel is None:
-        # Если канал не найден, используем первый из списка
         channel = client.get_channel(VZP_CHANNELS[0])
         if channel is None:
             print(f"❌ Канал VZP не найден!")
             return
     
-    # Формируем список участников
-    member_list = []
-    approved_list = []
     pending_list = []
+    approved_list = []
     rejected_list = []
     
     for user_id, data in vzp_data["members"].items():
@@ -700,11 +713,10 @@ async def update_vzp_message():
         else:
             pending_list.append(data['name'])
     
-    # Считаем время
     time_left = ""
     if vzp_data["start_time"]:
         elapsed = (datetime.datetime.now() - vzp_data["start_time"]).total_seconds()
-        remaining = max(0, 600 - elapsed)  # 10 минут = 600 секунд
+        remaining = max(0, 600 - elapsed)
         minutes = int(remaining // 60)
         seconds = int(remaining % 60)
         if remaining > 0:
@@ -712,8 +724,10 @@ async def update_vzp_message():
         else:
             time_left = "⏰ Время вышло!"
     
+    type_emoji = "⚔️" if vzp_data["vzp_type"] == "attack" else "🛡️"
+    
     embed = discord.Embed(
-        title="⚔️ Сбор на ВЗП",
+        title=f"{type_emoji} Сбор на ВЗП",
         description=f"**{vzp_data['text']}**",
         color=discord.Color.blue()
     )
@@ -750,7 +764,6 @@ async def update_vzp_message():
     view.add_item(VZPJoinButton())
     view.add_item(VZPLeaveButton())
     
-    # Добавляем кнопки для автора
     if vzp_data["author_id"] and len(vzp_data["members"]) > 0:
         for user_id, data in vzp_data["members"].items():
             if data["approved"] is None:
@@ -771,7 +784,7 @@ async def update_vzp_message():
 
 # --- Таймер VZP ---
 async def vzp_timer():
-    notification_times = [150, 300, 450]  # 2:30, 5:00, 7:30
+    notification_times = [150, 300, 450]
     
     for i, time in enumerate(notification_times):
         await asyncio.sleep(time - (notification_times[i-1] if i > 0 else 0))
@@ -779,7 +792,6 @@ async def vzp_timer():
         if vzp_data["is_completed"]:
             return
         
-        # Отправляем уведомление
         channel = client.get_channel(vzp_data["channel_id"])
         if channel:
             remaining = 600 - (datetime.datetime.now() - vzp_data["start_time"]).total_seconds()
@@ -793,8 +805,7 @@ async def vzp_timer():
                 f"Участников: {len(vzp_data['members'])}/{vzp_data['target_count']}"
             )
     
-    # Ждем до 10 минут
-    await asyncio.sleep(600 - 450)  # Оставшееся время до 10 минут
+    await asyncio.sleep(600 - 450)
     
     if vzp_data["is_completed"]:
         return
@@ -812,7 +823,6 @@ async def finish_vzp(success: bool):
     if channel is None:
         return
     
-    # Удаляем сообщение с кнопками
     if vzp_data["message_id"]:
         try:
             msg = await channel.fetch_message(vzp_data["message_id"])
@@ -820,12 +830,13 @@ async def finish_vzp(success: bool):
         except:
             pass
     
+    type_emoji = "⚔️" if vzp_data["vzp_type"] == "attack" else "🛡️"
+    
     if success:
-        # Сбор успешен
         approved_list = [data['name'] for data in vzp_data["members"].values() if data["approved"] is True]
         
         embed = discord.Embed(
-            title="✅ Сбор на ВЗП успешно завершен!",
+            title=f"{type_emoji} Сбор на ВЗП успешно завершен!",
             description=f"**{vzp_data['text']}**",
             color=discord.Color.green()
         )
@@ -840,11 +851,10 @@ async def finish_vzp(success: bool):
         await channel.send(content="@everyone", embed=embed)
         
     else:
-        # Сбор неудачен
         members_list = [data['name'] for data in vzp_data["members"].values()]
         
         embed = discord.Embed(
-            title="❌ Сбор на ВЗП провалился!",
+            title=f"{type_emoji} Сбор на ВЗП провалился!",
             description=f"**{vzp_data['text']}**\nНедостаточно реакций за 10 минут.",
             color=discord.Color.red()
         )
@@ -858,15 +868,16 @@ async def finish_vzp(success: bool):
         
         await channel.send(content="@everyone", embed=embed)
     
-    # Сбрасываем данные
     vzp_data["members"] = {}
     vzp_data["message_id"] = None
     vzp_data["is_completed"] = False
     vzp_data["target_count"] = 0
     vzp_data["author_id"] = None
     vzp_data["start_time"] = None
+    vzp_data["vzp_type"] = None
+    vzp_data["vzp_type_label"] = None
 
-# --- Кнопки машин (динамически создаются из файла) ---
+# --- Кнопки машин ---
 class CarButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -892,7 +903,7 @@ class CarButtonsView(View):
             )
         return callback
 
-# --- Кнопки освобождения (динамически создаются из файла) ---
+# --- Кнопки освобождения ---
 class FreeButtonsView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1442,7 +1453,6 @@ async def on_ready():
     print(f"📁 Текущая директория: {os.getcwd()}")
     print(f"📁 Загружено машин: {len(cars)}")
     
-    # Проверяем каналы VZP
     for channel_id in VZP_CHANNELS:
         channel = client.get_channel(channel_id)
         if channel:
@@ -1569,16 +1579,15 @@ async def contr_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"❌ Ошибка при ответе пользователю: {e}")
 
-# --- КОМАНДА: /vzpGO (новая команда вместо /vzp) ---
+# --- КОМАНДА: /vzpgo ---
 @tree.command(
     name="vzpgo", 
     description="Создать сбор на ВЗП",
     guild=discord.Object(id=GUILD_ID)
 )
 async def vzpgo_command(interaction: discord.Interaction):
-    """Открывает модальное окно для создания сбора на ВЗП."""
+    """Создает сбор на ВЗП."""
     
-    # Проверяем, что команда используется в одном из разрешенных каналов
     if interaction.channel_id not in VZP_CHANNELS:
         channels_mentions = " ".join([f"<#{ch_id}>" for ch_id in VZP_CHANNELS])
         await interaction.response.send_message(
@@ -1594,10 +1603,22 @@ async def vzpgo_command(interaction: discord.Interaction):
         )
         return
     
-    # Устанавливаем текущий канал как канал для сбора
     vzp_data["channel_id"] = interaction.channel_id
+    vzp_data["vzp_type"] = None
+    vzp_data["vzp_type_label"] = None
     
-    await interaction.response.send_modal(VZPModal())
+    embed = discord.Embed(
+        title="⚔️ Создание сбора на ВЗП",
+        description="**Выберите тип сбора:**\n"
+        "⚔️ **Атака** - для наступательных действий\n"
+        "🛡️ **Защита** - для оборонительных действий",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Выберите тип, затем введите текст и количество участников")
+    
+    view = VZPTypeView()
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 # --- КОМАНДА: /vzp_maps ---
 @tree.command(
@@ -1634,6 +1655,8 @@ async def vzp_maps_command(interaction: discord.Interaction):
     view = VZPMapsView(maps)
     
     await interaction.response.send_message(embed=embed, view=view)
+
+# --- ОСТАЛЬНЫЕ КОМАНДЫ ---
 
 # --- КОМАНДА: /cars ---
 @tree.command(
