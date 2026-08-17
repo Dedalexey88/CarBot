@@ -1569,13 +1569,13 @@ async def contr_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"❌ Ошибка при ответе пользователю: {e}")
 
-# --- КОМАНДА: /vzp ---
+# --- КОМАНДА: /vzpGO (новая команда вместо /vzp) ---
 @tree.command(
-    name="vzp", 
+    name="vzpgo", 
     description="Создать сбор на ВЗП",
     guild=discord.Object(id=GUILD_ID)
 )
-async def vzp_command(interaction: discord.Interaction):
+async def vzpgo_command(interaction: discord.Interaction):
     """Открывает модальное окно для создания сбора на ВЗП."""
     
     # Проверяем, что команда используется в одном из разрешенных каналов
