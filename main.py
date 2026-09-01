@@ -37,21 +37,9 @@ gw_data = {
     "task": None
 }
 
-# --- Время для оповещений GW (часы и минуты начала интервала) ---
-GW_TIMES = [
-    (8, 30),   # 08:30 — 08:59
-    (10, 30),  # 10:30 — 10:59
-    (12, 30),  # 12:30 — 12:59
-    (14, 30),  # 14:30 — 14:59
-    (16, 30),  # 16:30 — 16:59
-    (18, 30),  # 18:30 — 18:59
-    (20, 30),  # 20:30 — 20:59
-    (22, 30),  # 22:30 — 22:59
-    (0, 30),   # 00:30 — 00:59
-    (2, 30),   # 02:30 — 02:59
-    (4, 30),   # 04:30 — 04:59
-    (6, 30),   # 06:30 — 06:59
-]
+# --- Время для оповещений GW (каждые 5 минут в течение дня) ---
+# Генерируем все минуты, кратные 5 (0, 5, 10, 15, ... 55)
+GW_MINUTES = list(range(0, 60, 5))  # [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
 
 # --- Функция для загрузки машин из файла ---
 def load_cars():
@@ -131,20 +119,24 @@ def should_send_gw_notification():
         return False
     
     now = datetime.datetime.now(MOSCOW_TZ)
+    current_minute = now.minute
     
-    # Проверяем, не отправляли ли уже оповещение в этом интервале
+    # Проверяем, не отправляли ли уже оповещение в эту минуту
     if gw_data["last_notification"]:
         last = gw_data["last_notification"]
-        # Если последнее оповещение было сегодня в этом же часу и минуте
+        # Если последнее оповещение было в эту же минуту
         if (last.year == now.year and last.month == now.month and 
             last.day == now.day and last.hour == now.hour and 
             last.minute == now.minute):
             return False
     
-    # Проверяем, попадает ли текущее время в один из интервалов
-    for hour, minute in GW_TIMES:
-        if now.hour == hour and now.minute >= minute and now.minute <= minute + 29:
-            return True
+    # Проверяем, попадает ли текущая минута в интервал кратный 5
+    # (0-4, 5-9, 10-14, ...)
+    minute_range = current_minute // 5  # 0-11
+    
+    # Если текущая минута - первая в интервале (0, 5, 10, ... 55)
+    if current_minute % 5 == 0:
+        return True
     
     return False
 
@@ -160,16 +152,13 @@ async def send_gw_notification():
         return
     
     now = datetime.datetime.now(MOSCOW_TZ)
+    current_minute = now.minute
     
-    # Определяем интервал
-    interval = None
-    for hour, minute in GW_TIMES:
-        if now.hour == hour and now.minute >= minute and now.minute <= minute + 29:
-            interval = f"{hour:02d}:{minute:02d} — {hour:02d}:{minute + 29:02d}"
-            break
+    # Определяем интервал (5 минут)
+    start_minute = (current_minute // 5) * 5
+    end_minute = start_minute + 4
     
-    if not interval:
-        return
+    interval = f"{now.hour:02d}:{start_minute:02d} — {now.hour:02d}:{end_minute:02d}"
     
     await channel.send(
         f"@everyone\n"
@@ -183,7 +172,7 @@ async def send_gw_notification():
 
 # --- Фоновый цикл проверки GW ---
 async def gw_loop():
-    """Фоновый цикл, проверяющий каждые 30 секунд необходимость отправки оповещения."""
+    """Фоновый цикл, проверяющий каждые 10 секунд необходимость отправки оповещения."""
     await client.wait_until_ready()
     
     while not client.is_closed():
@@ -193,7 +182,7 @@ async def gw_loop():
         except Exception as e:
             print(f"❌ Ошибка в цикле GW: {e}")
         
-        await asyncio.sleep(30)  # Проверяем каждые 30 секунд
+        await asyncio.sleep(10)  # Проверяем каждые 10 секунд для точности
 
 # --- Получение списка карт из папки vzp_maps ---
 def get_vzp_maps():
@@ -1760,11 +1749,11 @@ async def vzp_maps_command(interaction: discord.Interaction):
 # --- КОМАНДА: /gw_on ---
 @tree.command(
     name="gw_on", 
-    description="Включить оповещения о Граффити Вар",
+    description="Включить оповещения о Граффити Вар (каждые 5 минут)",
     guild=discord.Object(id=GUILD_ID)
 )
 async def gw_on_command(interaction: discord.Interaction):
-    """Включает оповещения о Граффити Вар."""
+    """Включает оповещения о Граффити Вар каждые 5 минут."""
     
     if gw_data["enabled"]:
         await interaction.response.send_message(
@@ -1779,8 +1768,8 @@ async def gw_on_command(interaction: discord.Interaction):
     await interaction.response.send_message(
         "🔔 **Оповещения о Граффити Вар включены!**\n"
         f"📢 Канал: <#{GW_CHANNEL_ID}>\n"
-        f"⏰ Время оповещений:\n"
-        f"08:30, 10:30, 12:30, 14:30, 16:30, 18:30, 20:30, 22:30, 00:30, 02:30, 04:30, 06:30 (МСК)\n\n"
+        f"⏰ Оповещения каждые **5 минут** (в начале каждого 5-минутного интервала)\n"
+        f"🕐 Например: 00:00, 00:05, 00:10, ... 23:55 (МСК)\n\n"
         f"Чтобы отключить, используйте `/gw_off`",
         ephemeral=True
     )
