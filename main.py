@@ -175,7 +175,7 @@ async def send_gw_notification():
         f"@everyone\n"
         f"🎨 **Граффити Вар!**\n"
         f"⏰ Время: **{interval}** (по МСК)\n"
-        f"🏃 **Скорее забегайте в игру и рисуйте граффити!**"
+        f"🏃 **ВЗЯЛИ БАЛОНЫ В РУКИ И ВЫЕХАЛИ КРАСИТЬ ГЕТТО!**"
     )
     
     gw_data["last_notification"] = now
