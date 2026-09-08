@@ -15,6 +15,7 @@ CONTRACT_CHANNEL_ID = int(os.getenv('CONTRACT_CHANNEL_ID', 0))
 CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 GW_CHANNEL_ID = 1544246587918782504  # ID канала для Граффити Вар
+STREETWARS_CHANNEL_ID = 1544246587918782504  # ID канала для Street Wars (можно изменить)
 
 # --- ID каналов для VZP ---
 VZP_CHANNELS = [
@@ -37,25 +38,35 @@ gw_data = {
     "task": None
 }
 
+# --- Данные для Street Wars ---
+streetwars_data = {
+    "enabled": False,
+    "last_notification": None,
+    "task": None
+}
+
 # --- Время для оповещений GW (часы и минуты начала интервала) ---
-# Оповещения в :30 и :35 каждого интервала
 GW_TIMES = [
-    (8, 30),   # 08:30 и 08:35
-    (10, 30),  # 10:30 и 10:35
-    (12, 30),  # 12:30 и 12:35
-    (14, 30),  # 14:30 и 14:35
-    (16, 30),  # 16:30 и 16:35
-    (18, 30),  # 18:30 и 18:35
-    (20, 30),  # 20:30 и 20:35
-    (22, 30),  # 22:30 и 22:35
-    (0, 30),   # 00:30 и 00:35
-    (2, 30),   # 02:30 и 02:35
-    (4, 30),   # 04:30 и 04:35
-    (6, 30),   # 06:30 и 06:35
+    (8, 30), (8, 35),
+    (10, 30), (10, 35),
+    (12, 30), (12, 35),
+    (14, 30), (14, 35),
+    (16, 30), (16, 35),
+    (18, 30), (18, 35),
+    (20, 30), (20, 35),
+    (22, 30), (22, 35),
+    (0, 30), (0, 35),
+    (2, 30), (2, 35),
+    (4, 30), (4, 35),
+    (6, 30), (6, 35),
 ]
 
-# --- Минуты для оповещений в каждом интервале ---
-GW_NOTIFICATION_MINUTES = [30, 35]
+# --- Данные для Street Wars ---
+STREETWARS_DAYS = {
+    0: {"day": "Понедельник", "graffiti": "№11", "file": "11.png"},      # Monday
+    3: {"day": "Четверг", "graffiti": "№38", "file": "38.png"},          # Thursday
+    5: {"day": "Суббота", "graffiti": "№46", "file": "46.png"}           # Saturday
+}
 
 # --- Функция для загрузки машин из файла ---
 def load_cars():
@@ -130,7 +141,6 @@ tree = app_commands.CommandTree(client)
 
 # --- Функция для проверки, нужно ли отправлять оповещение GW ---
 def should_send_gw_notification():
-    """Проверяет, нужно ли отправить оповещение о Граффити Вар."""
     if not gw_data["enabled"]:
         return False
     
@@ -138,7 +148,6 @@ def should_send_gw_notification():
     current_hour = now.hour
     current_minute = now.minute
     
-    # Проверяем, не отправляли ли уже оповещение в эту минуту
     if gw_data["last_notification"]:
         last = gw_data["last_notification"]
         if (last.year == now.year and last.month == now.month and 
@@ -146,33 +155,25 @@ def should_send_gw_notification():
             last.minute == now.minute):
             return False
     
-    # Проверяем, есть ли интервал с таким часом
     for hour, minute in GW_TIMES:
-        if current_hour == hour:
-            # Проверяем, является ли текущая минута 30 или 35
-            if current_minute in GW_NOTIFICATION_MINUTES:
-                return True
+        if current_hour == hour and current_minute == minute:
+            return True
     
     return False
 
-# --- Функция для получения интервала ---
+# --- Функция для получения интервала GW ---
 def get_gw_interval(now):
-    """Возвращает строку с интервалом для оповещения."""
     current_hour = now.hour
     current_minute = now.minute
     
-    # Ищем интервал для текущего часа
-    for hour, minute in GW_TIMES:
-        if current_hour == hour:
-            start_minute = minute
-            end_minute = minute + 29
-            return f"{hour:02d}:{start_minute:02d} — {hour:02d}:{end_minute:02d}"
-    
+    if current_minute == 30:
+        return f"{current_hour:02d}:30 — {current_hour:02d}:59"
+    elif current_minute == 35:
+        return f"{current_hour:02d}:30 — {current_hour:02d}:59"
     return None
 
 # --- Функция отправки оповещения GW ---
 async def send_gw_notification():
-    """Отправляет оповещение о Граффити Вар."""
     if not gw_data["enabled"]:
         return
     
@@ -182,8 +183,6 @@ async def send_gw_notification():
         return
     
     now = datetime.datetime.now(MOSCOW_TZ)
-    
-    # Определяем интервал
     interval = get_gw_interval(now)
     if not interval:
         return
@@ -198,19 +197,94 @@ async def send_gw_notification():
     gw_data["last_notification"] = now
     print(f"✅ Оповещение GW отправлено в {now.strftime('%H:%M')}")
 
-# --- Фоновый цикл проверки GW ---
-async def gw_loop():
-    """Фоновый цикл, проверяющий каждые 10 секунд необходимость отправки оповещения."""
+# --- Функция для проверки Street Wars ---
+def should_send_streetwars_notification():
+    if not streetwars_data["enabled"]:
+        return False
+    
+    now = datetime.datetime.now(MOSCOW_TZ)
+    
+    # Проверяем, что сейчас 21:00
+    if now.hour != 21 or now.minute != 0:
+        return False
+    
+    # Проверяем день недели (пн=0, чт=3, сб=5)
+    if now.weekday() not in STREETWARS_DAYS:
+        return False
+    
+    # Проверяем, не отправляли ли уже сегодня
+    if streetwars_data["last_notification"]:
+        last = streetwars_data["last_notification"]
+        if (last.year == now.year and last.month == now.month and 
+            last.day == now.day):
+            return False
+    
+    return True
+
+# --- Функция отправки оповещения Street Wars ---
+async def send_streetwars_notification():
+    if not streetwars_data["enabled"]:
+        return
+    
+    channel = client.get_channel(STREETWARS_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал Street Wars не найден! ID: {STREETWARS_CHANNEL_ID}")
+        return
+    
+    now = datetime.datetime.now(MOSCOW_TZ)
+    weekday = now.weekday()
+    
+    if weekday not in STREETWARS_DAYS:
+        return
+    
+    day_info = STREETWARS_DAYS[weekday]
+    
+    # Формируем сообщение
+    message = (
+        f"@everyone\n"
+        f"🏁 **Street Wars!**\n"
+        f"📅 День: **{day_info['day']}**\n"
+        f"⏰ Время: **21:00 - 21:30** (по МСК)\n"
+        f"🎨 Графитка: **{day_info['graffiti']}**\n"
+        f"🏃 **Все заряжаемся / групп на мероприятие Street Wars!**"
+    )
+    
+    # Ищем файл с изображением
+    file_path = os.path.join('graffiti', day_info['file'])
+    
+    try:
+        if os.path.exists(file_path):
+            file = discord.File(file_path, filename=day_info['file'])
+            await channel.send(message, file=file)
+        else:
+            await channel.send(message)
+            print(f"⚠️ Файл {file_path} не найден!")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке Street Wars: {e}")
+        await channel.send(message)
+    
+    streetwars_data["last_notification"] = now
+    print(f"✅ Оповещение Street Wars отправлено в {now.strftime('%H:%M')}")
+
+# --- Фоновый цикл проверки ---
+async def notification_loop():
+    """Фоновый цикл, проверяющий каждые 10 секунд необходимость отправки оповещений."""
     await client.wait_until_ready()
     
     while not client.is_closed():
         try:
+            # Проверяем GW
             if gw_data["enabled"] and should_send_gw_notification():
                 await send_gw_notification()
+            
+            # Проверяем Street Wars
+            if streetwars_data["enabled"] and should_send_streetwars_notification():
+                await send_streetwars_notification()
+                
         except Exception as e:
-            print(f"❌ Ошибка в цикле GW: {e}")
+            print(f"❌ Ошибка в цикле оповещений: {e}")
         
-        await asyncio.sleep(10)  # Проверяем каждые 10 секунд
+        await asyncio.sleep(10)
 
 # --- Получение списка карт из папки vzp_maps ---
 def get_vzp_maps():
@@ -1577,6 +1651,23 @@ async def on_ready():
     else:
         print(f'❌ КАНАЛ GW (ID: {GW_CHANNEL_ID}) НЕ НАЙДЕН!')
     
+    sw_channel = client.get_channel(STREETWARS_CHANNEL_ID)
+    if sw_channel:
+        print(f'✅ Канал Street Wars найден: {sw_channel.name} (ID: {sw_channel.id})')
+    else:
+        print(f'❌ КАНАЛ Street Wars (ID: {STREETWARS_CHANNEL_ID}) НЕ НАЙДЕН!')
+    
+    # Проверяем наличие папки graffiti
+    if os.path.exists('graffiti'):
+        print(f'✅ Папка graffiti найдена!')
+        try:
+            files = os.listdir('graffiti')
+            print(f'📁 Содержимое graffiti: {files}')
+        except:
+            print('⚠️ Не удалось прочитать содержимое graffiti')
+    else:
+        print(f'❌ Папка graffiti НЕ НАЙДЕНА!')
+    
     for channel_id, name in [(CONTRACT_CHANNEL_ID, "Контрактов"), (CAR_CHANNEL_ID, "Машин")]:
         if channel_id:
             channel = client.get_channel(channel_id)
@@ -1597,8 +1688,8 @@ async def on_ready():
     if CAR_CHANNEL_ID:
         await update_cars_channel()
     
-    # Запускаем фоновый цикл GW
-    client.loop.create_task(gw_loop())
+    # Запускаем фоновый цикл оповещений
+    client.loop.create_task(notification_loop())
     
     await send_log(f"✅ Бот **{client.user}** запущен!")
 
@@ -1781,8 +1872,6 @@ async def vzp_maps_command(interaction: discord.Interaction):
     guild=discord.Object(id=GUILD_ID)
 )
 async def gw_on_command(interaction: discord.Interaction):
-    """Включает оповещения о Граффити Вар."""
-    
     if gw_data["enabled"]:
         await interaction.response.send_message(
             "🔔 **Оповещения о Граффити Вар уже включены!**",
@@ -1796,10 +1885,7 @@ async def gw_on_command(interaction: discord.Interaction):
     await interaction.response.send_message(
         "🔔 **Оповещения о Граффити Вар включены!**\n"
         f"📢 Канал: <#{GW_CHANNEL_ID}>\n"
-        f"⏰ Оповещения в :30 и :35 каждого часа:\n"
-        f"08:30, 08:35, 10:30, 10:35, 12:30, 12:35, 14:30, 14:35,\n"
-        f"16:30, 16:35, 18:30, 18:35, 20:30, 20:35, 22:30, 22:35,\n"
-        f"00:30, 00:35, 02:30, 02:35, 04:30, 04:35, 06:30, 06:35 (МСК)\n\n"
+        f"⏰ Оповещения в :30 и :35 каждого часа\n\n"
         f"Чтобы отключить, используйте `/gw_off`",
         ephemeral=True
     )
@@ -1811,8 +1897,6 @@ async def gw_on_command(interaction: discord.Interaction):
     guild=discord.Object(id=GUILD_ID)
 )
 async def gw_off_command(interaction: discord.Interaction):
-    """Отключает оповещения о Граффити Вар."""
-    
     if not gw_data["enabled"]:
         await interaction.response.send_message(
             "🔕 **Оповещения о Граффити Вар уже отключены!**",
@@ -1828,6 +1912,119 @@ async def gw_off_command(interaction: discord.Interaction):
         "Чтобы включить, используйте `/gw_on`",
         ephemeral=True
     )
+
+# --- КОМАНДА: /streetwar_on ---
+@tree.command(
+    name="streetwar_on", 
+    description="Включить оповещения о Street Wars (Пн, Чт, Сб в 21:00)",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def streetwar_on_command(interaction: discord.Interaction):
+    if streetwars_data["enabled"]:
+        await interaction.response.send_message(
+            "🔔 **Оповещения о Street Wars уже включены!**",
+            ephemeral=True
+        )
+        return
+    
+    streetwars_data["enabled"] = True
+    streetwars_data["last_notification"] = None
+    
+    await interaction.response.send_message(
+        "🔔 **Оповещения о Street Wars включены!**\n"
+        f"📢 Канал: <#{STREETWARS_CHANNEL_ID}>\n"
+        f"📅 Дни: **Понедельник, Четверг, Суббота**\n"
+        f"⏰ Время: **21:00** (по МСК)\n"
+        f"🖼️ Графитки: №11 (Пн), №38 (Чт), №46 (Сб)\n\n"
+        f"Чтобы отключить, используйте `/streetwar_off`",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /streetwar_off ---
+@tree.command(
+    name="streetwar_off", 
+    description="Отключить оповещения о Street Wars",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def streetwar_off_command(interaction: discord.Interaction):
+    if not streetwars_data["enabled"]:
+        await interaction.response.send_message(
+            "🔕 **Оповещения о Street Wars уже отключены!**",
+            ephemeral=True
+        )
+        return
+    
+    streetwars_data["enabled"] = False
+    streetwars_data["last_notification"] = None
+    
+    await interaction.response.send_message(
+        "🔕 **Оповещения о Street Wars отключены!**\n"
+        "Чтобы включить, используйте `/streetwar_on`",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /streetwar_test ---
+@tree.command(
+    name="streetwar_test", 
+    description="Показать информацию о Street Wars по дням",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def streetwar_test_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🏁 Street Wars - Информация",
+        description="Оповещения приходят в **21:00** в указанные дни",
+        color=discord.Color.blue()
+    )
+    
+    for weekday, data in STREETWARS_DAYS.items():
+        file_path = os.path.join('graffiti', data['file'])
+        file_exists = os.path.exists(file_path)
+        
+        embed.add_field(
+            name=f"📅 {data['day']}",
+            value=f"🖼️ Графитка: **{data['graffiti']}**\n"
+                  f"📁 Файл: {'✅ Найден' if file_exists else '❌ Не найден'}\n"
+                  f"⏰ Время: 21:00 - 21:30",
+            inline=True
+        )
+    
+    embed.add_field(
+        name="📋 Пример сообщения",
+        value=f"```\n@everyone\n"
+              f"🏁 Street Wars!\n"
+              f"📅 День: Понедельник\n"
+              f"⏰ Время: 21:00 - 21:30 (по МСК)\n"
+              f"🎨 Графитка: №11\n"
+              f"🏃 Все заряжаемся / групп на мероприятие Street Wars!\n```",
+        inline=False
+    )
+    embed.set_footer(text="Для включения оповещений используйте /streetwar_on")
+    
+    # Проверяем наличие файлов
+    files_found = []
+    files_missing = []
+    for data in STREETWARS_DAYS.values():
+        file_path = os.path.join('graffiti', data['file'])
+        if os.path.exists(file_path):
+            files_found.append(data['file'])
+        else:
+            files_missing.append(data['file'])
+    
+    if files_missing:
+        embed.add_field(
+            name="⚠️ Отсутствуют файлы",
+            value=f"Создайте папку `graffiti` и добавьте файлы:\n"
+                  f"❌ {', '.join(files_missing)}",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="✅ Все файлы найдены",
+            value=f"📁 Папка `graffiti` содержит: {', '.join(files_found)}",
+            inline=False
+        )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # --- КОМАНДА: /cars ---
 @tree.command(
