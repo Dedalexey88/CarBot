@@ -16,7 +16,8 @@ CAR_CHANNEL_ID = int(os.getenv('CAR_CHANNEL_ID', 0))
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 GW_CHANNEL_ID = 1544246587918782504  # ID канала для Граффити Вар
 STREETWARS_CHANNEL_ID = 1544246587918782504  # ID канала для Street Wars
-CHR_CHANNEL_ID = 1544246587918782504  # ID канала для Чёрного рынка (можно изменить)
+CHR_CHANNEL_ID = 1544246587918782504  # ID канала для Чёрного рынка
+DROP_CHANNEL_ID = 1544246587918782504  # ID канала для ДРОП
 
 # --- ID каналов для VZP ---
 VZP_CHANNELS = [
@@ -32,26 +33,11 @@ MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 # --- Путь к файлу с данными о машинах ---
 CARS_FILE = 'cars_data.json'
 
-# --- Данные для GW оповещений ---
-gw_data = {
-    "enabled": False,
-    "last_notification": None,
-    "task": None
-}
-
-# --- Данные для Street Wars ---
-streetwars_data = {
-    "enabled": False,
-    "last_notification": None,
-    "task": None
-}
-
-# --- Данные для Чёрного рынка ---
-chr_data = {
-    "enabled": False,
-    "last_notification": None,
-    "task": None
-}
+# --- Данные для оповещений ---
+gw_data = {"enabled": False, "last_notification": None, "task": None}
+streetwars_data = {"enabled": False, "last_notification": None, "task": None}
+chr_data = {"enabled": False, "last_notification": None, "task": None}
+drop_data = {"enabled": False, "last_notification": None, "task": None}
 
 # --- Время для оповещений GW ---
 GW_TIMES = [
@@ -70,6 +56,18 @@ STREETWARS_DAYS = {
 
 # --- Время для оповещений Чёрного рынка ---
 CHR_TIMES = [(19, 40), (19, 45), (19, 50), (19, 55), (20, 0)]
+
+# --- Время для оповещений ДРОП ---
+DROP_TIMES = [
+    (1, 45), (2, 0),
+    (4, 45), (5, 0),
+    (7, 45), (8, 0),
+    (10, 45), (11, 0),
+    (13, 45), (14, 0),
+    (16, 45), (17, 0),
+    (19, 45), (20, 0),
+    (22, 45), (23, 0),
+]
 
 # --- Функция для загрузки машин из файла ---
 def load_cars():
@@ -121,18 +119,10 @@ contracts = {}
 
 # --- Данные для VZP ---
 vzp_data = {
-    "members": {},
-    "message_id": None,
-    "channel_id": VZP_CHANNEL_ID,
-    "target_count": 0,
-    "is_completed": False,
-    "last_reminder_time": None,
-    "reminder_task": None,
-    "text": "Сбор реакций на ВЗП!",
-    "author_id": None,
-    "start_time": None,
-    "vzp_type": None,
-    "vzp_type_label": None
+    "members": {}, "message_id": None, "channel_id": VZP_CHANNEL_ID,
+    "target_count": 0, "is_completed": False, "last_reminder_time": None,
+    "reminder_task": None, "text": "Сбор реакций на ВЗП!", "author_id": None,
+    "start_time": None, "vzp_type": None, "vzp_type_label": None
 }
 
 # --- НАСТРОЙКА БОТА ---
@@ -142,64 +132,29 @@ intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# --- Функция для проверки, нужно ли отправлять оповещение GW ---
-def should_send_gw_notification():
-    if not gw_data["enabled"]:
+# --- Функции проверки оповещений ---
+def check_notification(data, times, time_format="hour_minute"):
+    """Универсальная функция проверки необходимости оповещения."""
+    if not data["enabled"]:
         return False
     
     now = datetime.datetime.now(MOSCOW_TZ)
-    current_hour = now.hour
-    current_minute = now.minute
     
-    if gw_data["last_notification"]:
-        last = gw_data["last_notification"]
+    if data["last_notification"]:
+        last = data["last_notification"]
         if (last.year == now.year and last.month == now.month and 
             last.day == now.day and last.hour == now.hour and 
             last.minute == now.minute):
             return False
     
-    for hour, minute in GW_TIMES:
-        if current_hour == hour and current_minute == minute:
-            return True
+    if time_format == "hour_minute":
+        for hour, minute in times:
+            if now.hour == hour and now.minute == minute:
+                return True
     
     return False
 
-# --- Функция для получения интервала GW ---
-def get_gw_interval(now):
-    current_hour = now.hour
-    current_minute = now.minute
-    
-    if current_minute in [30, 35]:
-        return f"{current_hour:02d}:30 — {current_hour:02d}:59"
-    return None
-
-# --- Функция отправки оповещения GW ---
-async def send_gw_notification():
-    if not gw_data["enabled"]:
-        return
-    
-    channel = client.get_channel(GW_CHANNEL_ID)
-    if channel is None:
-        print(f"❌ Канал GW не найден! ID: {GW_CHANNEL_ID}")
-        return
-    
-    now = datetime.datetime.now(MOSCOW_TZ)
-    interval = get_gw_interval(now)
-    if not interval:
-        return
-    
-    await channel.send(
-        f"@everyone\n"
-        f"🎨 **Граффити Вар!**\n"
-        f"⏰ Время: **{interval}** (по МСК)\n"
-        f"🏃 **ВЗЯЛИ БАЛОНЫ В РУКИ И ВЫЕХАЛИ КРАСИТЬ ГЕТТО!**"
-    )
-    
-    gw_data["last_notification"] = now
-    print(f"✅ Оповещение GW отправлено в {now.strftime('%H:%M')}")
-
-# --- Функция для проверки Street Wars ---
-def should_send_streetwars_notification():
+def should_send_streetwars():
     if not streetwars_data["enabled"]:
         return False
     
@@ -213,13 +168,40 @@ def should_send_streetwars_notification():
     
     if streetwars_data["last_notification"]:
         last = streetwars_data["last_notification"]
-        if (last.year == now.year and last.month == now.month and 
-            last.day == now.day):
+        if (last.year == now.year and last.month == now.month and last.day == now.day):
             return False
     
     return True
 
-# --- Функция отправки оповещения Street Wars ---
+# --- Функции отправки оповещений ---
+async def send_gw_notification():
+    if not gw_data["enabled"]:
+        return
+    
+    channel = client.get_channel(GW_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал GW не найден! ID: {GW_CHANNEL_ID}")
+        return
+    
+    now = datetime.datetime.now(MOSCOW_TZ)
+    current_hour = now.hour
+    current_minute = now.minute
+    
+    if current_minute in [30, 35]:
+        interval = f"{current_hour:02d}:30 — {current_hour:02d}:59"
+    else:
+        return
+    
+    await channel.send(
+        f"@everyone\n"
+        f"🎨 **Граффити Вар!**\n"
+        f"⏰ Время: **{interval}** (по МСК)\n"
+        f"🏃 **ВЗЯЛИ БАЛОНЫ В РУКИ И ВЫЕХАЛИ КРАСИТЬ ГЕТТО!**"
+    )
+    
+    gw_data["last_notification"] = now
+    print(f"✅ Оповещение GW отправлено в {now.strftime('%H:%M')}")
+
 async def send_streetwars_notification():
     if not streetwars_data["enabled"]:
         return
@@ -262,30 +244,6 @@ async def send_streetwars_notification():
     streetwars_data["last_notification"] = now
     print(f"✅ Оповещение Street Wars отправлено в {now.strftime('%H:%M')}")
 
-# --- Функция для проверки Чёрного рынка ---
-def should_send_chr_notification():
-    if not chr_data["enabled"]:
-        return False
-    
-    now = datetime.datetime.now(MOSCOW_TZ)
-    current_hour = now.hour
-    current_minute = now.minute
-    
-    # Проверяем, не отправляли ли уже в эту минуту
-    if chr_data["last_notification"]:
-        last = chr_data["last_notification"]
-        if (last.year == now.year and last.month == now.month and 
-            last.day == now.day and last.hour == now.hour and 
-            last.minute == now.minute):
-            return False
-    
-    for hour, minute in CHR_TIMES:
-        if current_hour == hour and current_minute == minute:
-            return True
-    
-    return False
-
-# --- Функция отправки оповещения Чёрного рынка ---
 async def send_chr_notification():
     if not chr_data["enabled"]:
         return
@@ -320,20 +278,57 @@ async def send_chr_notification():
     chr_data["last_notification"] = now
     print(f"✅ Оповещение Чёрного рынка отправлено в {now.strftime('%H:%M')}")
 
+async def send_drop_notification():
+    if not drop_data["enabled"]:
+        return
+    
+    channel = client.get_channel(DROP_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал ДРОП не найден! ID: {DROP_CHANNEL_ID}")
+        return
+    
+    now = datetime.datetime.now(MOSCOW_TZ)
+    
+    message = (
+        f"@everyone\n"
+        f"📦 **ДРОП - Воздушный Груз!**\n"
+        f"⏰ Время: **{now.strftime('%H:%M')}** (по МСК)\n"
+        f"🏃 **Все заряжаемся / групп на ДРОП!**"
+    )
+    
+    file_path = os.path.join('foto', 'airdrop.jpg')
+    
+    try:
+        if os.path.exists(file_path):
+            file = discord.File(file_path, filename="airdrop.jpg")
+            await channel.send(message, file=file)
+        else:
+            await channel.send(message)
+            print(f"⚠️ Файл {file_path} не найден!")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке ДРОП: {e}")
+        await channel.send(message)
+    
+    drop_data["last_notification"] = now
+    print(f"✅ Оповещение ДРОП отправлено в {now.strftime('%H:%M')}")
+
 # --- Фоновый цикл проверки ---
 async def notification_loop():
     await client.wait_until_ready()
     
     while not client.is_closed():
         try:
-            if gw_data["enabled"] and should_send_gw_notification():
+            if gw_data["enabled"] and check_notification(gw_data, GW_TIMES):
                 await send_gw_notification()
             
-            if streetwars_data["enabled"] and should_send_streetwars_notification():
+            if streetwars_data["enabled"] and should_send_streetwars():
                 await send_streetwars_notification()
             
-            if chr_data["enabled"] and should_send_chr_notification():
+            if chr_data["enabled"] and check_notification(chr_data, CHR_TIMES):
                 await send_chr_notification()
+            
+            if drop_data["enabled"] and check_notification(drop_data, DROP_TIMES):
+                await send_drop_notification()
                 
         except Exception as e:
             print(f"❌ Ошибка в цикле оповещений: {e}")
@@ -510,24 +505,15 @@ class TimeInputModal(Modal):
             minutes = int(self.time_input.value)
             
             if minutes < 1 or minutes > 120:
-                await interaction.response.send_message(
-                    "❌ Время должно быть от 1 до 120 минут!",
-                    ephemeral=True
-                )
+                await interaction.response.send_message("❌ Время должно быть от 1 до 120 минут!", ephemeral=True)
                 return
             
             if self.car_name not in cars:
-                await interaction.response.send_message(
-                    f"❌ Машина '{self.car_name}' не найдена!",
-                    ephemeral=True
-                )
+                await interaction.response.send_message(f"❌ Машина '{self.car_name}' не найдена!", ephemeral=True)
                 return
             
             if cars[self.car_name]["status"] == "Занята":
-                await interaction.response.send_message(
-                    f"❌ Машина '{self.car_name}' уже занята!",
-                    ephemeral=True
-                )
+                await interaction.response.send_message(f"❌ Машина '{self.car_name}' уже занята!", ephemeral=True)
                 return
             
             user_name = interaction.user.display_name
@@ -548,10 +534,7 @@ class TimeInputModal(Modal):
             await update_cars_channel()
             
         except ValueError:
-            await interaction.response.send_message(
-                "❌ Введите число!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Введите число!", ephemeral=True)
 
 # --- Класс для кнопок времени ---
 class TimeButtonsView(View):
@@ -589,24 +572,15 @@ class TimeButtonsView(View):
     
     async def take_car(self, interaction: discord.Interaction, minutes: int):
         if self.car_name not in cars:
-            await interaction.response.send_message(
-                f"❌ Машина '{self.car_name}' не найдена!",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ Машина '{self.car_name}' не найдена!", ephemeral=True)
             return
         
         if cars[self.car_name]["status"] == "Занята":
-            await interaction.response.send_message(
-                f"❌ Машина '{self.car_name}' уже занята!",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ Машина '{self.car_name}' уже занята!", ephemeral=True)
             return
         
         if minutes < 1 or minutes > 120:
-            await interaction.response.send_message(
-                "❌ Время должно быть от 1 до 120 минут!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Время должно быть от 1 до 120 минут!", ephemeral=True)
             return
         
         user_name = interaction.user.display_name
@@ -644,17 +618,11 @@ class AddCarModal(Modal):
         car_name = self.car_name_input.value.strip()
         
         if not car_name:
-            await interaction.response.send_message(
-                "❌ Название машины не может быть пустым!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Название машины не может быть пустым!", ephemeral=True)
             return
         
         if car_name in cars:
-            await interaction.response.send_message(
-                f"❌ Машина '{car_name}' уже существует!",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ Машина '{car_name}' уже существует!", ephemeral=True)
             return
         
         cars[car_name] = {"status": "Свободна", "user": None, "end_time": None}
@@ -662,11 +630,7 @@ class AddCarModal(Modal):
         
         await send_log(f"➕ **{interaction.user.display_name}** добавил машину: **{car_name}**")
         
-        await interaction.response.send_message(
-            f"✅ Машина '{car_name}' успешно добавлена!",
-            ephemeral=False
-        )
-        
+        await interaction.response.send_message(f"✅ Машина '{car_name}' успешно добавлена!", ephemeral=False)
         await update_cars_channel()
 
 # --- Модальное окно для VZP ---
@@ -696,23 +660,14 @@ class VZPTextModal(Modal):
         try:
             count = int(self.vzp_count.value)
             if count < 1 or count > 50:
-                await interaction.response.send_message(
-                    "❌ Количество участников должно быть от 1 до 50!",
-                    ephemeral=True
-                )
+                await interaction.response.send_message("❌ Количество участников должно быть от 1 до 50!", ephemeral=True)
                 return
         except ValueError:
-            await interaction.response.send_message(
-                "❌ Введите число!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Введите число!", ephemeral=True)
             return
         
         if vzp_data["vzp_type"] is None:
-            await interaction.response.send_message(
-                "❌ Сначала выберите тип сбора (Атака/Защита)!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Сначала выберите тип сбора (Атака/Защита)!", ephemeral=True)
             return
         
         vzp_data["members"] = {}
@@ -759,165 +714,97 @@ class VZPTypeView(View):
 # --- Кнопка "Записаться на ВЗП" ---
 class VZPJoinButton(Button):
     def __init__(self):
-        super().__init__(
-            label="✅ Записаться на ВЗП",
-            style=discord.ButtonStyle.success,
-            custom_id="vzp_join"
-        )
+        super().__init__(label="✅ Записаться на ВЗП", style=discord.ButtonStyle.success, custom_id="vzp_join")
     
     async def callback(self, interaction: discord.Interaction):
         if vzp_data["is_completed"]:
-            await interaction.response.send_message(
-                "❌ Сбор уже завершен!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Сбор уже завершен!", ephemeral=True)
             return
         
         user_id = str(interaction.user.id)
         
         if user_id in vzp_data["members"]:
-            await interaction.response.send_message(
-                "❌ Вы уже записаны!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы уже записаны!", ephemeral=True)
             return
         
         if len(vzp_data["members"]) >= vzp_data["target_count"]:
-            await interaction.response.send_message(
-                f"❌ Достигнут максимум участников ({vzp_data['target_count']})!",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ Достигнут максимум участников ({vzp_data['target_count']})!", ephemeral=True)
             return
         
-        vzp_data["members"][user_id] = {
-            "name": interaction.user.display_name,
-            "approved": None
-        }
+        vzp_data["members"][user_id] = {"name": interaction.user.display_name, "approved": None}
         
-        await interaction.response.send_message(
-            f"✅ Вы записались на ВЗП!",
-            ephemeral=True
-        )
-        
+        await interaction.response.send_message(f"✅ Вы записались на ВЗП!", ephemeral=True)
         await update_vzp_message()
 
 # --- Кнопка "Отписаться от ВЗП" ---
 class VZPLeaveButton(Button):
     def __init__(self):
-        super().__init__(
-            label="❌ Отписаться от ВЗП",
-            style=discord.ButtonStyle.danger,
-            custom_id="vzp_leave"
-        )
+        super().__init__(label="❌ Отписаться от ВЗП", style=discord.ButtonStyle.danger, custom_id="vzp_leave")
     
     async def callback(self, interaction: discord.Interaction):
         if vzp_data["is_completed"]:
-            await interaction.response.send_message(
-                "❌ Сбор уже завершен!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Сбор уже завершен!", ephemeral=True)
             return
         
         user_id = str(interaction.user.id)
         
         if user_id not in vzp_data["members"]:
-            await interaction.response.send_message(
-                "❌ Вы не записаны!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы не записаны!", ephemeral=True)
             return
         
         del vzp_data["members"][user_id]
         
-        await interaction.response.send_message(
-            f"❌ Вы отписались от ВЗП!",
-            ephemeral=True
-        )
-        
+        await interaction.response.send_message(f"❌ Вы отписались от ВЗП!", ephemeral=True)
         await update_vzp_message()
 
 # --- Кнопка "✅" ---
 class VZPApproveButton(Button):
     def __init__(self, user_id: str, user_name: str):
-        super().__init__(
-            label=f"✅ {user_name}",
-            style=discord.ButtonStyle.success,
-            custom_id=f"vzp_approve_{user_id}"
-        )
+        super().__init__(label=f"✅ {user_name}", style=discord.ButtonStyle.success, custom_id=f"vzp_approve_{user_id}")
         self.user_id = user_id
         self.user_name = user_name
     
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != vzp_data["author_id"]:
-            await interaction.response.send_message(
-                "❌ Только создатель сбора может подтверждать участников!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Только создатель сбора может подтверждать участников!", ephemeral=True)
             return
         
         if vzp_data["is_completed"]:
-            await interaction.response.send_message(
-                "❌ Сбор уже завершен!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Сбор уже завершен!", ephemeral=True)
             return
         
         if self.user_id not in vzp_data["members"]:
-            await interaction.response.send_message(
-                "❌ Участник не найден!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Участник не найден!", ephemeral=True)
             return
         
         vzp_data["members"][self.user_id]["approved"] = True
         
-        await interaction.response.send_message(
-            f"✅ {self.user_name} подтвержден!",
-            ephemeral=True
-        )
-        
+        await interaction.response.send_message(f"✅ {self.user_name} подтвержден!", ephemeral=True)
         await update_vzp_message()
 
 # --- Кнопка "❌" ---
 class VZPRejectButton(Button):
     def __init__(self, user_id: str, user_name: str):
-        super().__init__(
-            label=f"❌ {user_name}",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"vzp_reject_{user_id}"
-        )
+        super().__init__(label=f"❌ {user_name}", style=discord.ButtonStyle.danger, custom_id=f"vzp_reject_{user_id}")
         self.user_id = user_id
         self.user_name = user_name
     
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != vzp_data["author_id"]:
-            await interaction.response.send_message(
-                "❌ Только создатель сбора может отклонять участников!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Только создатель сбора может отклонять участников!", ephemeral=True)
             return
         
         if vzp_data["is_completed"]:
-            await interaction.response.send_message(
-                "❌ Сбор уже завершен!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Сбор уже завершен!", ephemeral=True)
             return
         
         if self.user_id not in vzp_data["members"]:
-            await interaction.response.send_message(
-                "❌ Участник не найден!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Участник не найден!", ephemeral=True)
             return
         
         vzp_data["members"][self.user_id]["approved"] = False
         
-        await interaction.response.send_message(
-            f"❌ {self.user_name} отклонен!",
-            ephemeral=True
-        )
-        
+        await interaction.response.send_message(f"❌ {self.user_name} отклонен!", ephemeral=True)
         await update_vzp_message()
 
 # --- Обновление сообщения VZP ---
@@ -966,25 +853,13 @@ async def update_vzp_message():
     )
     
     if pending_list:
-        embed.add_field(
-            name="⏳ Ожидают подтверждения",
-            value="\n".join([f"• {name}" for name in pending_list]),
-            inline=False
-        )
+        embed.add_field(name="⏳ Ожидают подтверждения", value="\n".join([f"• {name}" for name in pending_list]), inline=False)
     
     if approved_list:
-        embed.add_field(
-            name="✅ Подтверждены",
-            value="\n".join([f"• {name}" for name in approved_list]),
-            inline=False
-        )
+        embed.add_field(name="✅ Подтверждены", value="\n".join([f"• {name}" for name in approved_list]), inline=False)
     
     if rejected_list:
-        embed.add_field(
-            name="❌ Отклонены",
-            value="\n".join([f"• {name}" for name in rejected_list]),
-            inline=False
-        )
+        embed.add_field(name="❌ Отклонены", value="\n".join([f"• {name}" for name in rejected_list]), inline=False)
     
     embed.set_footer(text="Нажмите кнопку, чтобы записаться или отписаться")
     
@@ -1027,8 +902,7 @@ async def vzp_timer():
             seconds = int(remaining % 60)
             
             await channel.send(
-                f"@everyone\n"
-                f"⏰ **Скорее поставьте реакцию на ВЗП!**\n"
+                f"@everyone\n⏰ **Скорее поставьте реакцию на ВЗП!**\n"
                 f"Осталось: {minutes} мин {seconds} сек\n"
                 f"Участников: {len(vzp_data['members'])}/{vzp_data['target_count']}"
             )
@@ -1068,16 +942,10 @@ async def finish_vzp(success: bool):
             description=f"**{vzp_data['text']}**",
             color=discord.Color.green()
         )
-        
-        embed.add_field(
-            name="👥 Идут в теру:",
-            value="\n".join([f"• {name}" for name in approved_list]) if approved_list else "🔴 Нет участников",
-            inline=False
-        )
+        embed.add_field(name="👥 Идут в теру:", value="\n".join([f"• {name}" for name in approved_list]) if approved_list else "🔴 Нет участников", inline=False)
         embed.set_footer(text="Вперёд парни, принесите Дону победу!")
         
         await channel.send(content="@everyone", embed=embed)
-        
     else:
         members_list = [data['name'] for data in vzp_data["members"].values()]
         
@@ -1086,12 +954,7 @@ async def finish_vzp(success: bool):
             description=f"**{vzp_data['text']}**\nНедостаточно реакций за 10 минут.",
             color=discord.Color.red()
         )
-        
-        embed.add_field(
-            name="📋 Список записавшихся:",
-            value="\n".join([f"• {name}" for name in members_list]) if members_list else "🔴 Никто не записался",
-            inline=False
-        )
+        embed.add_field(name="📋 Список записавшихся:", value="\n".join([f"• {name}" for name in members_list]) if members_list else "🔴 Никто не записался", inline=False)
         embed.set_footer(text="Попробуйте снова!")
         
         await channel.send(content="@everyone", embed=embed)
@@ -1119,16 +982,9 @@ class CarButtonsView(View):
     def create_callback(self, car_name):
         async def callback(interaction: discord.Interaction):
             if cars[car_name]["status"] == "Занята":
-                await interaction.response.send_message(
-                    f"❌ Машина **{car_name}** уже занята!",
-                    ephemeral=True
-                )
+                await interaction.response.send_message(f"❌ Машина **{car_name}** уже занята!", ephemeral=True)
                 return
-            await interaction.response.send_message(
-                f"🚗 **{car_name}**\nВыберите время (1-120 мин):",
-                view=TimeButtonsView(car_name),
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"🚗 **{car_name}**\nВыберите время (1-120 мин):", view=TimeButtonsView(car_name), ephemeral=True)
         return callback
 
 # --- Кнопки освобождения ---
@@ -1145,17 +1001,11 @@ class FreeButtonsView(View):
     def create_callback(self, car_name):
         async def callback(interaction: discord.Interaction):
             if cars[car_name]["status"] == "Свободна":
-                await interaction.response.send_message(
-                    f"✅ Машина '{car_name}' уже свободна!",
-                    ephemeral=True
-                )
+                await interaction.response.send_message(f"✅ Машина '{car_name}' уже свободна!", ephemeral=True)
                 return
             
             if cars[car_name]["user"] != interaction.user.display_name:
-                await interaction.response.send_message(
-                    f"❌ Вы не можете освободить эту машину! Ее взял: {cars[car_name]['user']}",
-                    ephemeral=True
-                )
+                await interaction.response.send_message(f"❌ Вы не можете освободить эту машину! Ее взял: {cars[car_name]['user']}", ephemeral=True)
                 return
             
             user_name = cars[car_name]["user"]
@@ -1165,22 +1015,14 @@ class FreeButtonsView(View):
             
             save_cars(cars)
             
-            await interaction.response.send_message(
-                f"✅ Машина '{car_name}' освобождена!",
-                ephemeral=False
-            )
-            
+            await interaction.response.send_message(f"✅ Машина '{car_name}' освобождена!", ephemeral=False)
             await update_cars_channel()
         return callback
 
 # --- Класс для кнопок карт VZP ---
 class VZPMapButton(Button):
     def __init__(self, map_name: str, file_path: str):
-        super().__init__(
-            label=map_name,
-            style=discord.ButtonStyle.primary,
-            custom_id=f"vzp_map_{map_name}"
-        )
+        super().__init__(label=map_name, style=discord.ButtonStyle.primary, custom_id=f"vzp_map_{map_name}")
         self.map_name = map_name
         self.file_path = file_path
     
@@ -1189,27 +1031,15 @@ class VZPMapButton(Button):
             with open(self.file_path, 'rb') as f:
                 file = discord.File(f, filename=f"{self.map_name}.png")
                 
-                embed = discord.Embed(
-                    title=f"🗺️ Карта: {self.map_name}",
-                    color=discord.Color.blue()
-                )
+                embed = discord.Embed(title=f"🗺️ Карта: {self.map_name}", color=discord.Color.blue())
                 embed.set_image(url=f"attachment://{self.map_name}.png")
                 embed.set_footer(text="VZP Карта")
                 
-                await interaction.response.send_message(
-                    content=f"🗺️ **Карта {self.map_name}**",
-                    embed=embed,
-                    file=file,
-                    ephemeral=True
-                )
+                await interaction.response.send_message(content=f"🗺️ **Карта {self.map_name}**", embed=embed, file=file, ephemeral=True)
         except Exception as e:
             print(f"❌ Ошибка при отправке карты {self.map_name}: {e}")
-            await interaction.response.send_message(
-                f"❌ Не удалось загрузить карту {self.map_name}",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ Не удалось загрузить карту {self.map_name}", ephemeral=True)
 
-# --- Вью для кнопок карт VZP ---
 class VZPMapsView(View):
     def __init__(self, maps: list):
         super().__init__(timeout=None)
@@ -1218,30 +1048,15 @@ class VZPMapsView(View):
 
 # --- Функция для создания контракта из сообщения ---
 async def create_contract_from_message(message: discord.Message, name: str):
-    print(f"🔵 Создание контракта из сообщения от {message.author.display_name}")
-    print(f"🔵 Название: {name}")
-    
     channel = message.channel
-    
     contract_id = f"{message.author.id}_{int(datetime.datetime.now().timestamp())}"
     
     contracts[contract_id] = {
-        "name": name,
-        "author": message.author.display_name,
-        "author_id": str(message.author.id),
-        "members": {},
-        "created_at": datetime.datetime.now(),
-        "message_id": None,
-        "time_left": "10 минут"
+        "name": name, "author": message.author.display_name, "author_id": str(message.author.id),
+        "members": {}, "created_at": datetime.datetime.now(), "message_id": None, "time_left": "10 минут"
     }
     
-    print(f"✅ Контракт создан: {contract_id}")
-    
-    embed = discord.Embed(
-        title="📋 Контракт",
-        description=f"**{name}**",
-        color=discord.Color.blue()
-    )
+    embed = discord.Embed(title="📋 Контракт", description=f"**{name}**", color=discord.Color.blue())
     embed.add_field(name="Создал", value=message.author.mention, inline=True)
     embed.add_field(name="Статус", value="⏳ Набор участников (0/3)", inline=True)
     embed.add_field(name="Осталось времени", value="10 минут", inline=True)
@@ -1253,13 +1068,8 @@ async def create_contract_from_message(message: discord.Message, name: str):
     view.add_item(ContractJoinButton(contract_id))
     
     try:
-        sent_message = await channel.send(
-            content="@Контракт @everyone",
-            embed=embed,
-            view=view
-        )
+        sent_message = await channel.send(content="@Контракт @everyone", embed=embed, view=view)
         contracts[contract_id]["message_id"] = sent_message.id
-        print(f"✅ Сообщение отправлено: {sent_message.id}")
     except Exception as e:
         print(f"❌ Ошибка при отправке сообщения: {e}")
         if contract_id in contracts:
@@ -1271,12 +1081,8 @@ async def create_contract_from_message(message: discord.Message, name: str):
     view.add_item(CancelContractButton(contract_id))
     await sent_message.edit(view=view)
     
-    try:
-        task = asyncio.create_task(contract_timer(contract_id))
-        contracts[contract_id]["timer_task"] = task
-        print(f"✅ Таймер запущен с 0")
-    except Exception as e:
-        print(f"❌ Ошибка при запуске таймера: {e}")
+    task = asyncio.create_task(contract_timer(contract_id))
+    contracts[contract_id]["timer_task"] = task
 
 # --- Функция для обновления сообщения с контрактом ---
 async def update_contract_message(contract_id: str):
@@ -1288,20 +1094,12 @@ async def update_contract_message(contract_id: str):
     
     member_list = "\n".join([f"• {data['name']} - {data['skill']}" for data in members.values()]) if members else "🔴 Нет участников"
     
-    embed = discord.Embed(
-        title="📋 Контракт",
-        description=f"**{contract_data['name']}**",
-        color=discord.Color.blue()
-    )
+    embed = discord.Embed(title="📋 Контракт", description=f"**{contract_data['name']}**", color=discord.Color.blue())
     embed.add_field(name="Создал", value=contract_data['author'], inline=True)
     embed.add_field(name="Статус", value=f"⏳ Набор участников ({len(members)}/3)", inline=True)
     embed.add_field(name="Осталось времени", value=contract_data['time_left'], inline=True)
     embed.add_field(name="Минимум", value="2 человека", inline=True)
-    embed.add_field(
-        name=f"👥 Участники ({len(members)} человек)",
-        value=member_list,
-        inline=False
-    )
+    embed.add_field(name=f"👥 Участники ({len(members)} человек)", value=member_list, inline=False)
     embed.set_footer(text="Нажмите кнопку ниже, чтобы записаться или отказаться")
     
     view = View(timeout=None)
@@ -1336,44 +1134,23 @@ class SkillSelectView(View):
     
     async def select_callback(self, interaction: discord.Interaction):
         skill_level = self.select.values[0]
-        
-        skill_names = {
-            "weak": "🔹 Слабые",
-            "medium": "🔸 Средние",
-            "strong": "🔺 Сильные"
-        }
+        skill_names = {"weak": "🔹 Слабые", "medium": "🔸 Средние", "strong": "🔺 Сильные"}
         skill_text = skill_names.get(skill_level, "Не указаны")
         
         user_id = str(interaction.user.id)
         
         if self.contract_id not in contracts:
-            await interaction.response.send_message(
-                "❌ Контракт уже завершен!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Контракт уже завершен!", ephemeral=True)
             return
         
         if user_id in contracts[self.contract_id]["members"]:
-            await interaction.response.send_message(
-                "❌ Вы уже записаны!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы уже записаны!", ephemeral=True)
             return
         
-        contracts[self.contract_id]["members"][user_id] = {
-            "name": interaction.user.display_name,
-            "skill": skill_text
-        }
-        
-        print(f"✅ Участник добавлен: {interaction.user.display_name} ({skill_text})")
-        print(f"📊 Всего участников: {len(contracts[self.contract_id]['members'])}")
+        contracts[self.contract_id]["members"][user_id] = {"name": interaction.user.display_name, "skill": skill_text}
         
         await update_contract_message(self.contract_id)
-        
-        await interaction.response.send_message(
-            f"✅ Вы записались на контракт с навыками: **{skill_text}**!",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Вы записались на контракт с навыками: **{skill_text}**!", ephemeral=True)
         
         if len(contracts[self.contract_id]["members"]) >= 3:
             await finish_contract(self.contract_id)
@@ -1381,75 +1158,44 @@ class SkillSelectView(View):
 # --- Кнопка "Отказаться" ---
 class CancelContractButton(Button):
     def __init__(self, contract_id: str):
-        super().__init__(
-            label="❌ Отказаться от выполнения",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"cancel_contract_{contract_id}"
-        )
+        super().__init__(label="❌ Отказаться от выполнения", style=discord.ButtonStyle.danger, custom_id=f"cancel_contract_{contract_id}")
         self.contract_id = contract_id
     
     async def callback(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
         
         if self.contract_id not in contracts:
-            await interaction.response.send_message(
-                "❌ Контракт уже завершен!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Контракт уже завершен!", ephemeral=True)
             return
         
         if user_id not in contracts[self.contract_id]["members"]:
-            await interaction.response.send_message(
-                "❌ Вы не записаны на этот контракт!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы не записаны на этот контракт!", ephemeral=True)
             return
         
         del contracts[self.contract_id]["members"][user_id]
         
         await update_contract_message(self.contract_id)
-        
-        await interaction.response.send_message(
-            f"❌ Вы отказались от выполнения контракта!",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"❌ Вы отказались от выполнения контракта!", ephemeral=True)
 
 # --- Кнопка вступления ---
 class ContractJoinButton(Button):
     def __init__(self, contract_id: str):
-        super().__init__(
-            label="✅ Вступить на выполнение контракта",
-            style=discord.ButtonStyle.success,
-            custom_id=f"contract_join_{contract_id}"
-        )
+        super().__init__(label="✅ Вступить на выполнение контракта", style=discord.ButtonStyle.success, custom_id=f"contract_join_{contract_id}")
         self.contract_id = contract_id
     
     async def callback(self, interaction: discord.Interaction):
-        print(f"🔵 Кнопка нажата пользователем {interaction.user.display_name}")
-        
         if self.contract_id not in contracts:
-            await interaction.response.send_message(
-                "❌ Контракт уже завершен или не существует!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Контракт уже завершен или не существует!", ephemeral=True)
             return
         
         if str(interaction.user.id) in contracts[self.contract_id]["members"]:
-            await interaction.response.send_message(
-                "❌ Вы уже записаны на этот контракт!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы уже записаны на этот контракт!", ephemeral=True)
             return
         
         view = SkillSelectView(self.contract_id)
-        
-        await interaction.response.send_message(
-            "📝 **Выберите уровень ваших навыков:**",
-            view=view,
-            ephemeral=True
-        )
+        await interaction.response.send_message("📝 **Выберите уровень ваших навыков:**", view=view, ephemeral=True)
 
-# --- Функция отправки уведомления ---
+# --- Функция отправки уведомления контракта ---
 async def send_contract_notification(contract_id: str, minutes: int, seconds: int = 0):
     if contract_id not in contracts:
         return None
@@ -1464,16 +1210,11 @@ async def send_contract_notification(contract_id: str, minutes: int, seconds: in
     if channel is None:
         return None
     
-    if seconds > 0:
-        time_text = f"{minutes} мин {seconds} сек"
-    else:
-        time_text = f"{minutes} минут"
-    
+    time_text = f"{minutes} мин {seconds} сек" if seconds > 0 else f"{minutes} минут"
     needed = 3 - len(members)
     
     msg = await channel.send(
-        f"@Контракт @everyone\n"
-        f"⏰ **Осталось {time_text}!**\n"
+        f"@Контракт @everyone\n⏰ **Осталось {time_text}!**\n"
         f"Скорее ставьте реакции в контракт **{contract_data['name']}**!\n"
         f"Нужно еще **{needed}** человек."
     )
@@ -1519,26 +1260,14 @@ async def contract_timer(contract_id: str):
                 pass
     
     if len(members) >= 2:
-        embed = discord.Embed(
-            title="✅ Контракт сформирован!",
-            description=f"**{contract_data['name']}**",
-            color=discord.Color.green()
-        )
-        
+        embed = discord.Embed(title="✅ Контракт сформирован!", description=f"**{contract_data['name']}**", color=discord.Color.green())
         embed.add_field(name="Создал", value=contract_data['author'], inline=True)
         
         member_list = []
         for user_id, data in members.items():
-            member_list.append(
-                f"**{data['name']}**\n"
-                f"  📊 Навыки: {data['skill']}"
-            )
+            member_list.append(f"**{data['name']}**\n  📊 Навыки: {data['skill']}")
         
-        embed.add_field(
-            name=f"👥 Участники ({len(members)} человек)",
-            value="\n\n".join(member_list),
-            inline=False
-        )
+        embed.add_field(name=f"👥 Участники ({len(members)} человек)", value="\n\n".join(member_list), inline=False)
         embed.set_footer(text="Удачи в выполнении контракта! 🍀")
         
         if "message_id" in contract_data and contract_data["message_id"]:
@@ -1548,12 +1277,8 @@ async def contract_timer(contract_id: str):
             except:
                 pass
         
-        msg = await channel.send(
-            content="@Контракт @everyone",
-            embed=embed
-        )
+        msg = await channel.send(content="@Контракт @everyone", embed=embed)
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
-        
     else:
         member_list = "\n".join([f"• {data['name']}" for data in members.values()]) if members else "🔴 Никто не записался"
         
@@ -1595,34 +1320,18 @@ async def finish_contract(contract_id: str):
                 except:
                     pass
             
-            await channel.send(
-                f"❌ **{contract_data['name']}**\n"
-                f"Извините, нужно минимум двое на контракт.\n"
-                f"Записалось: {len(members)} человек."
-            )
+            await channel.send(f"❌ **{contract_data['name']}**\nИзвините, нужно минимум двое на контракт.\nЗаписалось: {len(members)} человек.")
         del contracts[contract_id]
         return
     
-    embed = discord.Embed(
-        title="✅ Контракт сформирован!",
-        description=f"**{contract_data['name']}**",
-        color=discord.Color.green()
-    )
-    
+    embed = discord.Embed(title="✅ Контракт сформирован!", description=f"**{contract_data['name']}**", color=discord.Color.green())
     embed.add_field(name="Создал", value=contract_data['author'], inline=True)
     
     member_list = []
     for user_id, data in members.items():
-        member_list.append(
-            f"**{data['name']}**\n"
-            f"  📊 Навыки: {data['skill']}"
-        )
+        member_list.append(f"**{data['name']}**\n  📊 Навыки: {data['skill']}")
     
-    embed.add_field(
-        name=f"👥 Участники ({len(members)} человек)",
-        value="\n\n".join(member_list),
-        inline=False
-    )
+    embed.add_field(name=f"👥 Участники ({len(members)} человек)", value="\n\n".join(member_list), inline=False)
     embed.set_footer(text="Удачи в выполнении контракта! 🍀")
     
     channel = client.get_channel(CONTRACT_CHANNEL_ID)
@@ -1634,10 +1343,7 @@ async def finish_contract(contract_id: str):
             except:
                 pass
         
-        msg = await channel.send(
-            content="@Контракт @everyone",
-            embed=embed
-        )
+        msg = await channel.send(content="@Контракт @everyone", embed=embed)
         await cleanup_channel(CONTRACT_CHANNEL_ID, keep_last=10, exclude_ids=[msg.id])
     
     del contracts[contract_id]
@@ -1688,14 +1394,14 @@ async def on_ready():
         else:
             print(f'❌ КАНАЛ VZP (ID: {channel_id}) НЕ НАЙДЕН!')
     
-    for ch_id, name in [(GW_CHANNEL_ID, "GW"), (STREETWARS_CHANNEL_ID, "Street Wars"), (CHR_CHANNEL_ID, "Чёрный рынок")]:
+    for ch_id, name in [(GW_CHANNEL_ID, "GW"), (STREETWARS_CHANNEL_ID, "Street Wars"), 
+                        (CHR_CHANNEL_ID, "Чёрный рынок"), (DROP_CHANNEL_ID, "ДРОП")]:
         channel = client.get_channel(ch_id)
         if channel:
             print(f'✅ Канал {name} найден: {channel.name} (ID: {channel.id})')
         else:
             print(f'❌ КАНАЛ {name} (ID: {ch_id}) НЕ НАЙДЕН!')
     
-    # Проверяем папки
     for folder in ['graffiti', 'foto']:
         if os.path.exists(folder):
             print(f'✅ Папка {folder} найдена!')
@@ -1856,11 +1562,10 @@ async def gw_off_command(interaction: discord.Interaction):
     
     gw_data["enabled"] = False
     gw_data["last_notification"] = None
-    
-    await interaction.response.send_message("🔕 **Оповещения о Граффити Вар отключены!**\nЧтобы включить, используйте `/gw_on`", ephemeral=True)
+    await interaction.response.send_message("🔕 **Оповещения о Граффити Вар отключены!**", ephemeral=True)
 
 # --- КОМАНДА: /streetwar_on ---
-@tree.command(name="streetwar_on", description="Включить оповещения о Street Wars (Пн, Чт, Сб в 21:00)", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="streetwar_on", description="Включить оповещения о Street Wars", guild=discord.Object(id=GUILD_ID))
 async def streetwar_on_command(interaction: discord.Interaction):
     if streetwars_data["enabled"]:
         await interaction.response.send_message("🔔 **Оповещения о Street Wars уже включены!**", ephemeral=True)
@@ -1871,10 +1576,8 @@ async def streetwar_on_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(
         "🔔 **Оповещения о Street Wars включены!**\n"
-        f"📢 Канал: <#{STREETWARS_CHANNEL_ID}>\n"
-        f"📅 Дни: **Понедельник, Четверг, Суббота**\n"
-        f"⏰ Время: **21:00** (по МСК)\n"
-        f"🖼️ Графитки: №11 (Пн), №38 (Чт), №46 (Сб)\n\n"
+        f"📅 Дни: Понедельник, Четверг, Суббота\n"
+        f"⏰ Время: 21:00 (по МСК)\n\n"
         f"Чтобы отключить, используйте `/streetwar_off`",
         ephemeral=True
     )
@@ -1888,17 +1591,12 @@ async def streetwar_off_command(interaction: discord.Interaction):
     
     streetwars_data["enabled"] = False
     streetwars_data["last_notification"] = None
-    
-    await interaction.response.send_message("🔕 **Оповещения о Street Wars отключены!**\nЧтобы включить, используйте `/streetwar_on`", ephemeral=True)
+    await interaction.response.send_message("🔕 **Оповещения о Street Wars отключены!**", ephemeral=True)
 
 # --- КОМАНДА: /streetwar_test ---
-@tree.command(name="streetwar_test", description="Показать информацию о Street Wars по дням", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="streetwar_test", description="Показать информацию о Street Wars", guild=discord.Object(id=GUILD_ID))
 async def streetwar_test_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🏁 Street Wars - Информация",
-        description="Оповещения приходят в **21:00** в указанные дни",
-        color=discord.Color.blue()
-    )
+    embed = discord.Embed(title="🏁 Street Wars - Информация", description="Оповещения приходят в **21:00**", color=discord.Color.blue())
     
     for weekday, data in STREETWARS_DAYS.items():
         file_path = os.path.join('graffiti', data['file'])
@@ -1907,37 +1605,14 @@ async def streetwar_test_command(interaction: discord.Interaction):
         embed.add_field(
             name=f"📅 {data['day']}",
             value=f"🖼️ Графитка: **{data['graffiti']}**\n"
-                  f"📁 Файл: {'✅ Найден' if file_exists else '❌ Не найден'}\n"
-                  f"⏰ Время: 21:00 - 21:30",
+                  f"📁 Файл: {'✅ Найден' if file_exists else '❌ Не найден'}",
             inline=True
-        )
-    
-    files_found = []
-    files_missing = []
-    for data in STREETWARS_DAYS.values():
-        file_path = os.path.join('graffiti', data['file'])
-        if os.path.exists(file_path):
-            files_found.append(data['file'])
-        else:
-            files_missing.append(data['file'])
-    
-    if files_missing:
-        embed.add_field(
-            name="⚠️ Отсутствуют файлы",
-            value=f"Создайте папку `graffiti` и добавьте файлы:\n❌ {', '.join(files_missing)}",
-            inline=False
-        )
-    else:
-        embed.add_field(
-            name="✅ Все файлы найдены",
-            value=f"📁 Папка `graffiti` содержит: {', '.join(files_found)}",
-            inline=False
         )
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # --- КОМАНДА: /chr_on ---
-@tree.command(name="chr_on", description="Включить оповещения о Чёрном рынке (19:40-20:00)", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="chr_on", description="Включить оповещения о Чёрном рынке", guild=discord.Object(id=GUILD_ID))
 async def chr_on_command(interaction: discord.Interaction):
     if chr_data["enabled"]:
         await interaction.response.send_message("🔔 **Оповещения о Чёрном рынке уже включены!**", ephemeral=True)
@@ -1948,9 +1623,7 @@ async def chr_on_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(
         "🔔 **Оповещения о Чёрном рынке включены!**\n"
-        f"📢 Канал: <#{CHR_CHANNEL_ID}>\n"
-        f"⏰ Время оповещений: **19:40, 19:45, 19:50, 19:55, 20:00** (по МСК)\n"
-        f"🖼️ Картинка: `foto/blackmarket.png`\n\n"
+        f"⏰ Время: 19:40, 19:45, 19:50, 19:55, 20:00 (МСК)\n\n"
         f"Чтобы отключить, используйте `/chr_off`",
         ephemeral=True
     )
@@ -1964,8 +1637,44 @@ async def chr_off_command(interaction: discord.Interaction):
     
     chr_data["enabled"] = False
     chr_data["last_notification"] = None
+    await interaction.response.send_message("🔕 **Оповещения о Чёрном рынке отключены!**", ephemeral=True)
+
+# --- КОМАНДА: /drop_on ---
+@tree.command(name="drop_on", description="Включить оповещения о ДРОП - Воздушный Груз", guild=discord.Object(id=GUILD_ID))
+async def drop_on_command(interaction: discord.Interaction):
+    if drop_data["enabled"]:
+        await interaction.response.send_message("🔔 **Оповещения о ДРОП уже включены!**", ephemeral=True)
+        return
     
-    await interaction.response.send_message("🔕 **Оповещения о Чёрном рынке отключены!**\nЧтобы включить, используйте `/chr_on`", ephemeral=True)
+    drop_data["enabled"] = True
+    drop_data["last_notification"] = None
+    
+    await interaction.response.send_message(
+        "🔔 **Оповещения о ДРОП - Воздушный Груз включены!**\n"
+        f"📢 Канал: <#{DROP_CHANNEL_ID}>\n"
+        f"⏰ Время оповещений (по МСК):\n"
+        f"• 01:45, 02:00\n"
+        f"• 04:45, 05:00\n"
+        f"• 07:45, 08:00\n"
+        f"• 10:45, 11:00\n"
+        f"• 13:45, 14:00\n"
+        f"• 16:45, 17:00\n"
+        f"• 19:45, 20:00\n"
+        f"• 22:45, 23:00\n\n"
+        f"Чтобы отключить, используйте `/drop_off`",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /drop_off ---
+@tree.command(name="drop_off", description="Отключить оповещения о ДРОП - Воздушный Груз", guild=discord.Object(id=GUILD_ID))
+async def drop_off_command(interaction: discord.Interaction):
+    if not drop_data["enabled"]:
+        await interaction.response.send_message("🔕 **Оповещения о ДРОП уже отключены!**", ephemeral=True)
+        return
+    
+    drop_data["enabled"] = False
+    drop_data["last_notification"] = None
+    await interaction.response.send_message("🔕 **Оповещения о ДРОП отключены!**", ephemeral=True)
 
 # --- КОМАНДА: /cars ---
 @tree.command(name="cars", description="Обновить список машин", guild=discord.Object(id=GUILD_ID))
