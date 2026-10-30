@@ -1488,11 +1488,10 @@ async def on_ready():
             print(f'✅ Канал VZP найден: {channel.name} (ID: {channel.id})')
         else:
             print(f'❌ КАНАЛ VZP (ID: {channel_id}) НЕ НАЙДЕН!')
-    
-        for ch_id, name in [(GW_CHANNEL_ID, "GW"), (STREETWARS_CHANNEL_ID, "Street Wars"), 
+
+    for ch_id, name in [(GW_CHANNEL_ID, "GW"), (STREETWARS_CHANNEL_ID, "Street Wars"),
                         (CHR_CHANNEL_ID, "Чёрный рынок"), (DROP_CHANNEL_ID, "ДРОП"),
                         (VZH_CHANNEL_ID, "ВЗХ")]:
-                        
         channel = client.get_channel(ch_id)
         if channel:
             print(f'✅ Канал {name} найден: {channel.name} (ID: {channel.id})')
