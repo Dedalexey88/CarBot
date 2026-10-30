@@ -18,6 +18,7 @@ GW_CHANNEL_ID = 1544246587918782504  # ID канала для Граффити �
 STREETWARS_CHANNEL_ID = 1544246587918782504  # ID канала для Street Wars
 CHR_CHANNEL_ID = 1544246587918782504  # ID канала для Чёрного рынка
 DROP_CHANNEL_ID = 1544246587918782504  # ID канала для ДРОП
+VZH_CHANNEL_ID = 1544246587918782504  # ID канала для ВЗХ - Война за Хаммеры
 
 # --- ID каналов для VZP ---
 VZP_CHANNELS = [
@@ -38,6 +39,23 @@ gw_data = {"enabled": False, "last_notification": None, "task": None}
 streetwars_data = {"enabled": False, "last_notification": None, "task": None}
 chr_data = {"enabled": False, "last_notification": None, "task": None}
 drop_data = {"enabled": False, "last_notification": None, "task": None}
+
+# --- Данные для ВЗХ - Война за Хаммеры ---
+vzh_data = {"enabled": False, "last_notification": None, "task": None}
+
+# --- Дни ВЗХ ---
+VZH_DAYS = {
+    0: "Общий",      # Понедельник
+    1: "Мафии",      # Вторник
+    2: "Банды",      # Среда
+    3: "Общий",      # Четверг
+    4: "Мафии",      # Пятница
+    5: "Банды",      # Суббота
+    6: "Общий"       # Воскресенье
+}
+
+# --- Время для оповещений ВЗХ ---
+VZH_TIMES = [(18, 10), (18, 50), (19, 0)]
 
 # --- Время для оповещений GW ---
 GW_TIMES = [
@@ -169,6 +187,24 @@ def should_send_streetwars():
     if streetwars_data["last_notification"]:
         last = streetwars_data["last_notification"]
         if (last.year == now.year and last.month == now.month and last.day == now.day):
+            return False
+    
+    return True
+
+def should_send_vzh():
+    if not vzh_data["enabled"]:
+        return False
+    
+    now = datetime.datetime.now(MOSCOW_TZ)
+    
+    if (now.hour, now.minute) not in VZH_TIMES:
+        return False
+    
+    if vzh_data["last_notification"]:
+        last = vzh_data["last_notification"]
+        if (last.year == now.year and last.month == now.month and 
+            last.day == now.day and last.hour == now.hour and 
+            last.minute == now.minute):
             return False
     
     return True
@@ -312,6 +348,62 @@ async def send_drop_notification():
     drop_data["last_notification"] = now
     print(f"✅ Оповещение ДРОП отправлено в {now.strftime('%H:%M')}")
 
+async def send_vzh_notification():
+    if not vzh_data["enabled"]:
+        return
+    
+    channel = client.get_channel(VZH_CHANNEL_ID)
+    if channel is None:
+        print(f"❌ Канал ВЗХ не найден! ID: {VZH_CHANNEL_ID}")
+        return
+    
+    now = datetime.datetime.now(MOSCOW_TZ)
+    weekday = now.weekday()
+    day_type = VZH_DAYS.get(weekday, "Общий")
+    
+    if now.hour == 18 and now.minute == 10:
+        title = "🔨 **ВЗХ - Война за Хаммеры!**"
+        action = "🏗️ **Первое объявление — делаем строй!**"
+        time_text = "18:10"
+    elif now.hour == 18 and now.minute == 50:
+        title = "🔨 **ВЗХ - Война за Хаммеры!**"
+        action = "📢 **Объявление на Прок терры!**"
+        time_text = "18:50"
+    elif now.hour == 19 and now.minute == 0:
+        title = "🔨 **ВЗХ - Война за Хаммеры!**"
+        action = "🚨 **НАЧАЛО СОБЫТИЯ!**"
+        time_text = "19:00"
+    else:
+        return
+    
+    message = (
+        f"@everyone\n"
+        f"{title}\n"
+        f"📅 День: **{day_type}**\n"
+        f"⏰ Время: **{time_text}** (по МСК)\n"
+        f"{action}\n"
+        f"🏃 **Все на ВЗХ - Войну за Хаммеры!**"
+    )
+    
+    file_path = os.path.join('foto', 'hammer.png')
+    
+    try:
+        if os.path.exists(file_path):
+            file = discord.File(file_path, filename="hammer.png")
+            await channel.send(message, file=file)
+        else:
+            await channel.send(message)
+            print(f"⚠️ Файл {file_path} не найден!")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке ВЗХ: {e}")
+        await channel.send(message)
+    
+    vzh_data["last_notification"] = now
+    print(f"✅ Оповещение ВЗХ отправлено в {now.strftime('%H:%M')} ({day_type})")
+    
+    
+
+
 # --- Фоновый цикл проверки ---
 async def notification_loop():
     await client.wait_until_ready()
@@ -329,6 +421,9 @@ async def notification_loop():
             
             if drop_data["enabled"] and check_notification(drop_data, DROP_TIMES):
                 await send_drop_notification()
+                
+            if vzh_data["enabled"] and should_send_vzh():
+                await send_vzh_notification()
                 
         except Exception as e:
             print(f"❌ Ошибка в цикле оповещений: {e}")
@@ -1394,8 +1489,10 @@ async def on_ready():
         else:
             print(f'❌ КАНАЛ VZP (ID: {channel_id}) НЕ НАЙДЕН!')
     
-    for ch_id, name in [(GW_CHANNEL_ID, "GW"), (STREETWARS_CHANNEL_ID, "Street Wars"), 
-                        (CHR_CHANNEL_ID, "Чёрный рынок"), (DROP_CHANNEL_ID, "ДРОП")]:
+        for ch_id, name in [(GW_CHANNEL_ID, "GW"), (STREETWARS_CHANNEL_ID, "Street Wars"), 
+                        (CHR_CHANNEL_ID, "Чёрный рынок"), (DROP_CHANNEL_ID, "ДРОП"),
+                        (VZH_CHANNEL_ID, "ВЗХ")]:
+                        
         channel = client.get_channel(ch_id)
         if channel:
             print(f'✅ Канал {name} найден: {channel.name} (ID: {channel.id})')
@@ -1811,6 +1908,46 @@ async def free_command(interaction: discord.Interaction, car_name: str):
     
     await interaction.response.send_message(f"✅ Машина '{car_name}' освобождена!", ephemeral=False)
     await update_cars_channel()
+
+# --- КОМАНДА: /vzh_on ---
+@tree.command(name="vzh_on", description="Включить оповещения о ВЗХ - Война за Хаммеры", guild=discord.Object(id=GUILD_ID))
+async def vzh_on_command(interaction: discord.Interaction):
+    if vzh_data["enabled"]:
+        await interaction.response.send_message("🔔 **Оповещения о ВЗХ уже включены!**", ephemeral=True)
+        return
+    
+    vzh_data["enabled"] = True
+    vzh_data["last_notification"] = None
+    
+    await interaction.response.send_message(
+        "🔔 **Оповещения о ВЗХ - Война за Хаммеры включены!**\n"
+        f"📢 Канал: <#{VZH_CHANNEL_ID}>\n"
+        f"⏰ Оповещения (по МСК):\n"
+        f"• 18:10 — Первое объявление (делаем строй)\n"
+        f"• 18:50 — Объявление на Прок терры\n"
+        f"• 19:00 — Начало события\n\n"
+        f"📅 Расписание дней:\n"
+        f"• Понедельник — Общий\n"
+        f"• Вторник — Мафии\n"
+        f"• Среда — Банды\n"
+        f"• Четверг — Общий\n"
+        f"• Пятница — Мафии\n"
+        f"• Суббота — Банды\n"
+        f"• Воскресенье — Общий\n\n"
+        f"Чтобы отключить, используйте `/vzh_off`",
+        ephemeral=True
+    )
+
+# --- КОМАНДА: /vzh_off ---
+@tree.command(name="vzh_off", description="Отключить оповещения о ВЗХ - Война за Хаммеры", guild=discord.Object(id=GUILD_ID))
+async def vzh_off_command(interaction: discord.Interaction):
+    if not vzh_data["enabled"]:
+        await interaction.response.send_message("🔕 **Оповещения о ВЗХ уже отключены!**", ephemeral=True)
+        return
+    
+    vzh_data["enabled"] = False
+    vzh_data["last_notification"] = None
+    await interaction.response.send_message("🔕 **Оповещения о ВЗХ - Война за Хаммеры отключены!**", ephemeral=True)
 
 # --- ЗАПУСК БОТА ---
 token = os.getenv('DISCORD_TOKEN')
